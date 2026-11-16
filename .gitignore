@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+records/*
+!records/.gitkeep
+*.log
+*.gz
+*.npz
+*.csv
+docs/screenshots/_preview_config.json
+__pycache__

@@ -1,0 +1,64 @@
+{
+  "buffer_seconds": 60.0,
+  "display_span_seconds": 2.0,
+  "target_fps": 30,
+  "serial": {
+    "port": null,
+    "baudrate": 2000000,
+    "read_bytes": 8192,
+    "timeout_seconds": 0.1
+  },
+  "tcp": {
+    "host": "192.168.4.1",
+    "port": 3333,
+    "read_bytes": 8192,
+    "timeout_seconds": 0.5
+  },
+  "protocol": {
+    "frame_period_seconds": 0.02,
+    "semg_nominal_rate": 2000.0,
+    "imu_nominal_rate": 500.0,
+    "pll_gain": 0.02,
+    "resync_threshold_seconds": 0.3,
+    "max_frame_gap": 256
+  },
+  "semg": {
+    "channel_count": 8,
+    "baseline_offset": 4000.0,
+    "auto_range": true,
+    "colors": [
+      "#e6194b",
+      "#3cb44b",
+      "#4363d8",
+      "#f58231",
+      "#911eb4",
+      "#46f0f0",
+      "#f032e6",
+      "#bcf60c"
+    ]
+  },
+  "imu": {
+    "show_magnetometer": true,
+    "attitude_cutoff_hz": 1.0
+  },
+  "analytics": {
+    "envelope_cutoff_hz": 4.0,
+    "stats_window_seconds": 1.0,
+    "output_rate_hz": 200.0,
+    "psd_samples": 2048
+  },
+  "link": {
+    "serial_capacity_bytes_per_second": 200000,
+    "tcp_capacity_bytes_per_second": 11520
+  },
+  "channel_map": {
+    "semg@2202fa": 0,
+    "semg@2201da": 1,
+    "semg@342d5e": 2,
+    "semg@278976": 3,
+    "semg@281246": 4,
+    "semg@342e06": 5,
+    "semg@351eca": 6,
+    "semg@2202b6": 7
+  }
+}
