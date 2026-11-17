@@ -186,6 +186,147 @@ def test_match_app_ignores_receiver_sharing_the_same_address():
     assert ota.match_app(both, node).name == "IMU-ESP32-342BFA"
 
 
+def _fw_with_desc(version: str = "test-1.0", sha: bytes = bytes(range(32))) -> bytes:
+    """造一份带合法 esp_app_desc_t 的镜像：0x20 处放描述符。"""
+    desc = bytearray(256)
+    struct.pack_into("<I", desc, 0, ota.APP_DESC_MAGIC)
+    desc[16:16 + len(version)] = version.encode()
+    desc[48:56] = b"bleprph\x00"
+    desc[80:88] = b"11:48:18\x00"
+    desc[96:108] = b"Nov 17 2026\x00"
+    desc[144:176] = sha
+    return b"\xe9" + bytes(0x1F) + bytes(desc) + bytes(1024)
+
+
+def test_parse_app_desc_reads_version_and_fingerprint():
+    sha = bytes((i * 3) & 0xFF for i in range(32))
+    desc = ota.parse_app_desc(_fw_with_desc("235c4e7-dirty", sha))
+    assert desc is not None
+    assert desc.version == "235c4e7-dirty"
+    assert desc.project == "bleprph"
+    assert desc.sha256 == sha.hex()
+    assert "Nov 17 2026" in desc.built and "11:48:18" in desc.built
+
+
+def test_parse_app_desc_rejects_non_esp_images():
+    assert ota.parse_app_desc(b"") is None
+    assert ota.parse_app_desc(bytes(512)) is None          # 魔数不对
+    assert ota.parse_app_desc(b"\xe9" + bytes(64)) is None  # 太短
+
+
+def test_parse_version_payload():
+    raw = b"1.2.3".ljust(32, b"\x00") + bytes(range(32))
+    assert ota.parse_version_payload(raw) == ("1.2.3", bytes(range(32)).hex())
+    assert ota.parse_version_payload(b"short") is None
+
+
+class FakeApp:
+    """升级后回到应用固件的替身：可控制是否暴露版本特征、读回什么。"""
+
+    def __init__(self, address, payload=None, has_char=True):
+        self.address = address
+        self.payload = payload
+        self.services = [_Svc([ota.VERSION_CHAR] if has_char else [ota.TRIGGER_CHAR])]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+    async def read_gatt_char(self, char):
+        return self.payload
+
+
+def _patch_app_scan(monkeypatch, client):
+    adv = ota.Advert(name="IMU-ESP32-342BFA", address="DC:B4:D9:34:2B:FA")
+
+    async def fake_discover(timeout, stop_when=None):
+        return [adv]
+
+    monkeypatch.setattr(ota, "_discover", fake_discover)
+    monkeypatch.setattr(ota, "_bleak", lambda: (lambda a, timeout=30.0: client, object()))
+
+
+def _verify_node():
+    return ota.OtaNode(kind="imu", suffix="34:2B:FA", address="DC:B4:D9:34:2B:FA")
+
+
+def _verify_opts():
+    return ota.OtaOptions(scan_timeout=0.01, verify_deadline=1.0, connect_timeout=1.0)
+
+
+def test_verify_app_passes_when_fingerprint_matches(monkeypatch):
+    sha = bytes(range(32))
+    fw = _fw_with_desc("v9", sha)
+    payload = b"v9".ljust(32, b"\x00") + sha
+    _patch_app_scan(monkeypatch, FakeApp("DC:B4:D9:34:2B:FA", payload))
+    log: list[str] = []
+    asyncio.run(ota._verify_app(_verify_node(), fw, _verify_opts(), _quiet_reporter(log)))
+    assert any("校验通过" in m for m in log)
+
+
+def test_verify_app_fails_when_device_kept_the_old_image(monkeypatch):
+    """坏镜像被拒收/回滚时设备跑的还是旧固件 —— 必须判失败，不能报成功。"""
+    fw = _fw_with_desc("v9", bytes(range(32)))
+    old = b"v8".ljust(32, b"\x00") + bytes(32)
+    _patch_app_scan(monkeypatch, FakeApp("DC:B4:D9:34:2B:FA", old))
+    with pytest.raises(ota.OtaError, match="拒收或回滚"):
+        asyncio.run(ota._verify_app(_verify_node(), fw, _verify_opts(), _quiet_reporter([])))
+
+
+def test_verify_app_degrades_gracefully_on_old_firmware(monkeypatch):
+    """旧应用固件没有 0xFFF2：跳过校验而不是把升级判失败。"""
+    _patch_app_scan(monkeypatch, FakeApp("DC:B4:D9:34:2B:FA", has_char=False))
+    log: list[str] = []
+    asyncio.run(ota._verify_app(_verify_node(), _fw_with_desc(), _verify_opts(), _quiet_reporter(log)))
+    assert any("校验跳过" in m for m in log)
+
+
+def test_verify_app_retries_when_windows_serves_a_stale_table(monkeypatch):
+    """设备刚重启时 Windows 可能端着旧 GATT 表：不能查一次就放弃，要刷缓存重连再查。"""
+    sha = bytes(range(32))
+    fw = _fw_with_desc("v9", sha)
+    payload = b"v9".ljust(32, b"\x00") + sha
+    made = []
+
+    class StaleThenFresh:
+        def __init__(self, address, timeout=30.0):
+            self.first = not made
+            made.append(self)
+            self.services = [_Svc([ota.TRIGGER_CHAR] if self.first else [ota.VERSION_CHAR])]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def read_gatt_char(self, char):
+            return payload
+
+    adv = ota.Advert(name="IMU-ESP32-342BFA", address="DC:B4:D9:34:2B:FA")
+
+    async def fake_discover(timeout, stop_when=None):
+        return [adv]
+
+    monkeypatch.setattr(ota, "_discover", fake_discover)
+    monkeypatch.setattr(ota, "_bleak", lambda: (StaleThenFresh, object()))
+    log: list[str] = []
+    asyncio.run(ota._verify_app(_verify_node(), fw, _verify_opts(), _quiet_reporter(log)))
+    assert len(made) == 2 and any("校验通过" in m for m in log)
+
+
+def test_verify_app_fails_when_node_never_returns(monkeypatch):
+    async def nothing(timeout, stop_when=None):
+        return []
+
+    monkeypatch.setattr(ota, "_discover", nothing)
+    monkeypatch.setattr(ota, "_bleak", lambda: (FakeApp, object()))
+    with pytest.raises(ota.OtaError, match="没有回到应用固件"):
+        asyncio.run(ota._verify_app(_verify_node(), _fw_with_desc(), _verify_opts(), _quiet_reporter([])))
+
+
 def test_scan_summary_turns_not_found_into_actionable_diagnosis():
     node = ota.OtaNode(kind="imu", suffix="34:2B:FA", address="AA:BB:CC:34:2B:FA")
     assert "适配器" in ota.scan_summary(node, [], "nimble-ble-ota")
@@ -380,6 +521,29 @@ def test_phase2_gives_up_with_gatt_cache_hint(monkeypatch):
         asyncio.run(ota._phase2_connect(node, opts, _quiet_reporter([])))
 
 
+def test_refresh_gatt_cache_reaches_through_the_backend():
+    """bleak 顶层 BleakClient 只是包装器，_requester 挂在 _backend 上。
+
+    取错层会静默返回 False，UNCACHED 强刷等于没做（实机日志里表现为"拿不到 GATT 缓存句柄"）。
+    """
+    pytest.importorskip("winrt.windows.devices.bluetooth")
+    calls = []
+
+    class Requester:
+        async def get_gatt_services_async(self, mode):
+            calls.append(mode)
+
+    class Backend:
+        _requester = Requester()
+
+    class Wrapper:
+        _backend = Backend()
+
+    assert asyncio.run(ota._refresh_gatt_cache(Wrapper())) is True
+    assert len(calls) == 1
+    assert asyncio.run(ota._refresh_gatt_cache(object())) is False
+
+
 def test_has_ota_profile_needs_both_characteristics():
     assert ota.has_ota_profile(FakeReceiver("AA:BB:CC:34:2B:FA"))
     assert not ota.has_ota_profile(AppLikeReceiver("AA:BB:CC:34:2B:FA"))
@@ -479,7 +643,10 @@ class FakeReceiver:
         self.fw_len = 0
         self.stopped = False
         self.connected = False
-        self.services = [_Svc([ota.RECV_FW_CHAR, ota.COMMAND_CHAR])]
+        self.services = [_Svc([ota.RECV_FW_CHAR, ota.COMMAND_CHAR, ota.VERSION_CHAR])]
+
+    async def read_gatt_char(self, char):
+        return b"fake-ver".ljust(32, b"\x00") + bytes(32)
 
     async def connect(self) -> None:
         self.connected = True
@@ -613,7 +780,7 @@ def test_upgrade_nodes_end_to_end(monkeypatch):
     node = ota.OtaNode(kind="semg", suffix="A4:CF:01", address="AA:BB:CC:A4:CF:01", uid="A4:CF:01")
     app_adv = ota.Advert(name="sEMG-ESP32-A4CF01", address="AA:BB:CC:A4:CF:01")
     rcv_adv = ota.Advert(name="nimble-ble-ota", address="AA:BB:CC:A4:CF:01")
-    rounds = [[app_adv], [rcv_adv], [rcv_adv]]
+    rounds = [[app_adv], [rcv_adv], [rcv_adv], [app_adv]]  # 最后一轮：传完后回到应用固件做校验
     calls: list[int] = []
     clients: list[FakeReceiver] = []
 
@@ -631,7 +798,8 @@ def test_upgrade_nodes_end_to_end(monkeypatch):
     monkeypatch.setattr(ota, "_bleak", lambda: (fake_client, object()))
 
     log: list[str] = []
-    opts = ota.OtaOptions(reboot_wait=0.0, ack_timeout=1.0, scan_timeout=0.01, settle_seconds=0.0)
+    opts = ota.OtaOptions(reboot_wait=0.0, ack_timeout=1.0, scan_timeout=0.01, settle_seconds=0.0,
+                          verify_deadline=1.0)
     # upgrade_nodes 自己起事件循环，这里必须同步调用，不能再套一层 asyncio.run
     results = ota.upgrade_nodes([(node, fw)], opts, _quiet_reporter(log))
     assert [err for _, err in results] == [""]

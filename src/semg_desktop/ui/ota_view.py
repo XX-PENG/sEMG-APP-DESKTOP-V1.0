@@ -122,6 +122,7 @@ class OtaView(QWidget):
         self._sig.finished.connect(self._on_job_finished)
         self._index: dict[str, int] = {}
         self._by_index: dict[int, str] = {}
+        self._desc_cache: dict[tuple, ota.AppDesc | None] = {}
 
         self.tbl = QTableWidget(0, len(COLUMNS))
         self.tbl.setHorizontalHeaderLabels(COLUMNS)
@@ -357,9 +358,16 @@ class OtaView(QWidget):
         if not path:
             return "未指定"
         p = Path(path)
-        size = f"{p.stat().st_size:,} B" if p.is_file() else "文件不存在"
+        if not p.is_file():
+            return f"{p.name} 文件不存在"
+        st = p.stat()
+        key = (str(p), st.st_mtime_ns, st.st_size)
+        if key not in self._desc_cache:
+            self._desc_cache[key] = ota.parse_app_desc(p.read_bytes())
+        desc = self._desc_cache[key]
         mark = "（自定）" if row.firmware else ""
-        return f"{p.name}{mark} {size}"
+        ver = f" [{desc.version}]" if desc else ""
+        return f"{p.name}{mark}{ver} {st.st_size:,} B"
 
     def firmware_for(self, row: OtaRow) -> str:
         return row.firmware or self.defaults.get(row.kind, "")

@@ -37,6 +37,7 @@ def uuid16(short: int) -> str:
 
 
 TRIGGER_CHAR = uuid16(0xFFF1)  # 应用固件里的 OTA 触发特征（服务 0xFFF0）
+VERSION_CHAR = uuid16(0xFFF2)  # 应用固件里的版本特征：version[32] + elf_sha256[32]
 RECV_FW_CHAR = uuid16(0x8020)  # 接收固件：固件数据
 COMMAND_CHAR = uuid16(0x8022)  # 接收固件：开始 / 结束命令
 
@@ -145,6 +146,43 @@ def firmware_warnings(data: bytes) -> list[str]:
     if data[0] != ESP_IMAGE_MAGIC:
         return [f"首字节 0x{data[0]:02X}，不是 ESP 应用镜像（应为 0xE9），确认它是 idf.py build 的产物"]
     return []
+
+
+# ── 镜像描述符与版本校验 ─────────────────────────────────────────────────────
+
+APP_DESC_OFFSET = 0x20          # esp_app_desc_t 在 .bin 里的固定偏移
+APP_DESC_MAGIC = 0xABCD5432
+APP_DESC_SIZE = 256
+
+
+@dataclass(frozen=True)
+class AppDesc:
+    version: str
+    project: str
+    built: str
+    sha256: str                 # app_elf_sha256 的 hex，精确到这一份二进制
+
+
+def parse_app_desc(fw: bytes) -> AppDesc | None:
+    """从 .bin 读 esp_app_desc_t（布局见 IDF esp_app_desc.h）。不是 ESP 镜像就返回 None。"""
+    if len(fw) < APP_DESC_OFFSET + APP_DESC_SIZE:
+        return None
+    d = fw[APP_DESC_OFFSET:APP_DESC_OFFSET + APP_DESC_SIZE]
+    if struct.unpack_from("<I", d, 0)[0] != APP_DESC_MAGIC:
+        return None
+
+    def text(off: int, n: int) -> str:
+        return d[off:off + n].split(b"\x00")[0].decode("utf-8", "replace")
+
+    return AppDesc(version=text(16, 32), project=text(48, 32),
+                   built=f"{text(96, 16)} {text(80, 16)}", sha256=d[144:176].hex())
+
+
+def parse_version_payload(raw: bytes) -> tuple[str, str] | None:
+    """应用固件 0xFFF2 的读回值：version[32] + elf_sha256[32]。"""
+    if len(raw) < 64:
+        return None
+    return raw[:32].split(b"\x00")[0].decode("utf-8", "replace"), raw[32:64].hex()
 
 
 # ── 节点身份 ─────────────────────────────────────────────────────────────────
@@ -272,6 +310,7 @@ class OtaOptions:
     receiver_deadline: float = 30.0  # 触发后多久内必须搜到接收固件
     ack_timeout: float = 15.0
     connect_timeout: float = 12.0
+    verify_deadline: float = 30.0    # 传完后等节点回到应用固件并读回版本的上限
     receiver_prefix: str = RECEIVER_NAME_PREFIX
 
     @staticmethod
@@ -504,7 +543,7 @@ async def _refresh_gatt_cache(client) -> bool:
     是按地址存的。不主动用 UNCACHED 读一次，bleak 建服务表时拿到的还是应用固件那张，
     0x8020 就"不存在"。非 Windows 或拿不到底层句柄时安静返回 False。
     """
-    requester = getattr(client, "_requester", None)
+    requester = getattr(getattr(client, "_backend", client), "_requester", None)
     if requester is None:
         return False
     try:
@@ -641,6 +680,55 @@ async def _send_firmware(client, fw: bytes, opts: OtaOptions, rep: OtaReporter) 
 # ── 对外入口 ─────────────────────────────────────────────────────────────────
 
 
+async def _verify_app(node: OtaNode, fw: bytes, opts: OtaOptions, rep: OtaReporter) -> None:
+    """传完后回到应用固件读版本特征，确认跑的确实是我们灌进去的那一份。
+
+    设备收满字节就自行重启，"校验失败回退"和"正常完成"在 PC 侧看到的断链一模一样，
+    不回读比对就会把拒收报成成功（坏镜像实机测试暴露过这个盲区）。
+    """
+    expected = parse_app_desc(fw)
+    client_cls, _ = _bleak()
+    stop_when = scan_target(node, opts.receiver_prefix, want_app=True)
+    deadline = time.monotonic() + opts.verify_deadline
+    raw: bytes | None = None
+    while True:
+        rep.check()
+        budget = max(0.5, deadline - time.monotonic())
+        advs = await _discover(min(opts.scan_timeout, budget), stop_when=stop_when)
+        target = match_app(advs, node, opts.receiver_prefix)
+        if target is None:
+            if time.monotonic() >= deadline:
+                raise OtaError(f"升级后 {opts.verify_deadline:.0f}s 内节点没有回到应用固件"
+                               "（可能没启动起来，或还在接收模式）")
+            await _sleep(0.3, rep)
+            continue
+        async with client_cls(target.address, timeout=opts.connect_timeout) as client:
+            chars = {c.uuid.lower() for svc in client.services for c in svc.characteristics}
+            if VERSION_CHAR in chars:
+                raw = bytes(await client.read_gatt_char(VERSION_CHAR))
+                break
+            # 设备刚重启时 Windows 可能还端着旧 GATT 表：强刷一次，断开重连再查
+            await _refresh_gatt_cache(client)
+        if time.monotonic() >= deadline:
+            rep.log("校验跳过：应用固件未暴露版本特征 0xFFF2（旧固件，或 GATT 缓存一直没刷过来），"
+                    "无法确认跑的是哪一份")
+            return
+        await _sleep(0.5, rep)
+
+    got = parse_version_payload(raw)
+    if got is None:
+        rep.log(f"校验跳过：版本特征长度异常（{len(raw)} B，期望 ≥64）")
+        return
+    version, sha = got
+    if expected is None:
+        rep.log(f"校验跳过：固件里读不到镜像描述符；设备当前 version={version}")
+        return
+    if sha != expected.sha256:
+        raise OtaError(f"设备拒收或回滚了：设备 sha={sha[:16]}… ≠ 期望 {expected.sha256[:16]}…"
+                       f"（设备 version={version}，期望 {expected.version}）")
+    rep.log(f"校验通过：version={version}，sha={sha[:16]}…，built={expected.built}")
+
+
 async def _upgrade_one(node: OtaNode, fw: bytes, opts: OtaOptions, rep: OtaReporter) -> None:
     await _phase1_trigger(node, opts, rep)
     rep.state(node.key, "传输中")
@@ -649,6 +737,8 @@ async def _upgrade_one(node: OtaNode, fw: bytes, opts: OtaOptions, rep: OtaRepor
         await _send_firmware(client, fw, opts, rep)
     finally:
         await client.disconnect()
+    rep.state(node.key, "校验中")
+    await _verify_app(node, fw, opts, rep)
 
 
 def upgrade_node(node: OtaNode, fw: bytes, opts: OtaOptions, rep: OtaReporter) -> None:
