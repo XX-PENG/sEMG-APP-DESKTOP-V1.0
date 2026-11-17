@@ -73,7 +73,7 @@ def test_main_window_receives_simulated_stream(qapp):
     assert len([r for r in rows if r["kind"] == "semg"]) == 8
     assert st.parse.semg_frames > 0 and st.parse.imu_frames > 0
 
-    for tab in (win.emg, win.imu, win.analysis, win.status):
+    for tab in (win.emg, win.imu, win.analysis, win.status, win.ota):
         win.tabs.setCurrentWidget(tab)
         win.refresh()
         qapp.processEvents()

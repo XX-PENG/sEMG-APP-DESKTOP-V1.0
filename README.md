@@ -37,7 +37,7 @@ powershell -File scripts\run.ps1 selftest             # 无硬件自检整条解
 python -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 ```
 
-依赖：PySide6、pyqtgraph、numpy、scipy、pyserial。
+依赖：PySide6、pyqtgraph、numpy、scipy、pyserial、bleak（只做固件升级页用，缺它界面照样起，OTA 页会提示装）。
 
 ---
 
@@ -112,12 +112,13 @@ host_time   = offset + device_time + i × period / n
 
 ## 5. 界面
 
-四个页签，数据只有一份，切页不重新采集。
+五个页签，数据只有一份，切页不重新采集。
 
 - **实时曲线**：8 通道堆叠 / 叠加 / 2×4 网格三种排布，峰值降采样 + 视口裁剪；可选叠加 4 Hz 包络；拖选区可直接喂给分析页；支持冻结画面读数。
 - **IMU**：加速度(g)/角速度(dps)/磁力计(原始) 三张子图 + 姿态方块（roll/pitch 由重力向量求，磁力计未标定所以不给航向）+ 9 分量当前值表。
 - **分析**：每通道样本数、实测速率、峰峰值、RMS、MAV、iEMG、int16 削顶计数；8 通道包络分层图；选中通道的 Welch 功率谱（对账 50 Hz 陷波是否生效很直接）。
 - **状态与链路**：设备表（在线、槽位、MAC、帧数、样本数、实测速率、最后 seq、drop、seq 缺口帧、重同步、缓冲、距今 ms）、链路速率与容量占用、12 项解析计数、判读提示、网关状态行原文。
+- **固件升级 (OTA)**：EMG / IMU 节点应用固件的 BLE 两阶段升级，详见第 9 节。
 
 截图（`scripts/ui_preview.py` 离屏渲染，无显示器也能出图）：
 
@@ -125,6 +126,7 @@ host_time   = offset + device_time + i × period / n
 | --- | --- |
 | ![实时曲线](docs/screenshots/emg_stacked.png) | ![IMU](docs/screenshots/imu.png) |
 | ![分析](docs/screenshots/analysis.png) | ![状态](docs/screenshots/status.png) |
+| ![固件升级](docs/screenshots/ota.png) | |
 
 ---
 
@@ -173,22 +175,73 @@ records/rec-YYYYmmdd-HHMMSS/
 | `analytics.envelope_cutoff_hz` | 4.0 | 包络低通 |
 | `link.serial_capacity_bytes_per_second` | 200000 | 容量占用条分母（2 Mbaud） |
 | `link.tcp_capacity_bytes_per_second` | 11520 | WIFI 网关 UART1 上限 |
+| `ota.receiver_name_prefix` | `nimble-ble-ota` | 接收固件广播名前缀（与 `sEMG-OTA` 工程一致就别动） |
+| `ota.scan_timeout_seconds` / `reboot_wait_seconds` / `ack_timeout_seconds` | 8 / 1.5 / 15 | 单轮扫描**上限**（扫到目标会提前收工）、触发后的固定等待、单扇区 ACK 等待 |
+| `ota.settle_seconds` | 1.5 | 连上接收固件后的静置：接收固件是"先开始广播、后注册数据回调和 ota_task"，抢连太快会写进没人收 |
+| `ota.trigger_wait_seconds` | 60 | 阶段 1 等节点空闲广播的上限：网关不断电时靠这段时间把网关搬走 |
+| `ota.firmware_dir` / `default_bins` | `""` | 固件对话框起始目录与 EMG/IMU 默认 bin 路径 |
 | `channel_map` | `{}` | 断开时自动写回 |
 
 ---
 
-## 9. 测试与验证
+## 9. 固件升级（EMG / IMU OTA）
 
-```sh
-.venv/bin/python -m pytest -q          # 69 个用例
-.venv/bin/python -m semg_desktop selftest
-```
+四块板共用一套双固件设计（见 [`sEMG-OTA-ESP32-V1.0`](../sEMG-OTA-ESP32-V1.0/README.md)）：`factory` 常驻一个与业务无关的 BLE 接收固件，`ota_0`/`ota_1` 放业务固件，A/B 交替写、旧槽留给 bootloader 回滚。本工具负责把新的应用固件灌进去，与工厂脚本 `tools/ble_ota_send.py` 同协议，只是带进度、可取消、能把 8 路 EMG 排着队一起升。
 
-覆盖：协议行级/字节级解析与失步恢复、ANSI/日志前缀、IMU 多行配对与截断、seq 回绕与缺口、PLL 抗抖动、全速灌文件不压缩时标、环形缓冲回绕、包络/RMS/iEMG/PSD 数值正确性、录制→回放→再解析的字节级闭环、TCP 源对真实 socket 的流式接收、四个视图的离屏渲染冒烟。
+两阶段：
+
+1. **触发**：连上节点的 GATT 特征 `0xFFF1` 写 4 字节 `"OTA!"`。节点把当前槽记进 NVS，切启动分区到 `factory` 后重启。
+2. **传输**：连上接收固件（广播名 `nimble-ble-ota`），命令特征 `0x8022` 发 `01 00 <固件长度:u32le>`，固件按 4096 字节一扇区、每包 `<扇区:u16le><包号:u8> + 净载` 写 `0x8020`；只有扇区末包回 20 字节 ACK（`[2]`=状态，`[18:20]`=CRC16-CCITT），状态 `02` 就整扇区重传。写完发 `02 00`，节点重启进新槽。
+
+包号只有 1 字节、`0xFF` 又被末包占用，所以每扇区最多 255 包，净载下限 17 字节（MTU ≥ 25）。接收固件按 517 配置；万一 MTU 没谈下来，本工具会直接报"每扇区会超过 255 包"而不会把包号写溢出——这条上限在工厂脚本 `ble_ota_send.py` 里是没设防的。
+
+**耗时花在哪**：561 KB 的 IMU 固件 = 1103 包（净载 509 B）+ 137 次扇区 ACK。`0x8020` 在接收固件里只开了 `BLE_GATT_CHR_F_WRITE`（没有 `WRITE_NO_RSP`），每包都要吃一次 ATT 应答往返，所以传输时间 ≈ 1240 次往返 × 连接间隔，落在十几到几十秒，取决于 Windows 适配器给这条连接选的间隔——bleak 不暴露参数更新，上位机侧改不了。能砍的是固定开销：扫描改成"扫到就走"（`scan_timeout` 从固定等待变成上限）、触发后的固定等待 6s→1.5s、结束命令的 ACK 3s→0.5s（设备根本不回这条），每台约省 20 s，8 路 EMG 排队就是 2.5 分钟。日志里每台都打"传完 X B 用时 Y s（Z KB/s）"和"整机 N s"，慢在哪一段一眼可见。
+
+再快就得动接收固件（`sEMG-OTA-ESP32-V1.0`）：给 `0x8020` 的 flags 加上 `BLE_GATT_CHR_F_WRITE_NO_RSP`，扇区内多包流水、只在末包等 ACK，理论 3–5 倍；代价是要用 UART 重烧一次 `factory` 分区。
+
+三个容易踩的坑，日志里都会明确区分：
+
+* **结束命令必然断链**。接收固件的 `ota_task` 一收满 `fw_len` 字节就 `esp_restart()`，不等 `02 00`，所以那条写会抛 `BleakError: disconnected`。完成与否的判据是"所有扇区都被 ACK 过"，这一步的异常按完成处理，不报失败。
+* **同一个地址两套 GATT 表，Windows 会喂你旧的**。双固件沿用同一个 BLE 地址，而 WinRT 的 GATT 缓存按地址存：连上接收固件却拿到应用固件那张服务表，`0x8020` 就"不存在"（`BleakCharacteristicNotFoundError`）。所以连上后先验服务表（`has_ota_profile`），不对就用 `BluetoothCacheMode.UNCACHED` 强刷一次再断开重连；刷不动才报错，并提示停用/启用适配器。同理，广播名优先取广播帧里的 `local_name` 而不是可能被缓存的 `dev.name`。
+* **连上太快会写进没人收的窗口**。`app_main` 里 `esp_ble_ota_host_init()` 一开始广播，数据回调和 `ota_task` 还在后面两行 —— 扫描改成"扫到就连"之后正好可能撞上，表现为开始命令等不到 ACK。所以连上后静置 `settle_seconds` 再动 GATT。
+
+操作顺序：
+
+1. 在 EMG / IMU 工程里 `idf.py build`，产物 `build/bleprph.bin`（必须 ≤ 2 MB，超了直接挡住）。
+2. **让目标节点空闲广播** —— 最容易踩的一条：应用固件被网关连上后就停止广播了（bleprph 只在断开后重新 advertise），上位机既搜不到它、也写不进触发字。三种办法任选：
+   - 网关断电，或让节点单独上电（最干净）；
+   - **不给网关断电**：先点开始升级，再把网关搬远/关进金属柜 —— 网关侧监督超时是 4 s（`main.c` 里 `supervision_timeout = 400`），断开后节点立刻恢复广播，阶段 1 会在 `trigger_wait_seconds`（默认 60 s）内持续扫描并自动抢下这次连接；进阶段 2 后把网关搬回来也不影响，网关不认 `nimble-ble-ota`；
+   - 节点本来就卡在接收固件模式（上次升级中断）：阶段 1 会识别出来并跳过触发直接续传。
+3. 打开"固件升级 (OTA)"页 → 选 EMG / IMU 固件 → **扫描 BLE 节点** → 勾选 → 开始升级。
+4. 阶段 2 不用管网关：网关只连 `sEMG-ESP32*` / `IMU-ESP32*`，不会去抢 `nimble-ble-ota`。
+
+设备行按 MAC 后 3 字节归并，两个来源合成一张表：
+
+| 来源 | 提供什么 |
+| --- | --- |
+| 网关文本流（connected 行） | 通道号、类型、**完整 BLE 地址**（`mac=` 就是节点地址本身） |
+| BLE 扫描 | 此刻真正能连上的节点、是否已处于接收固件模式 |
+
+有完整地址就按地址锁定，8 路同型号 EMG 不会串台；地址未知的行只能用"为选中行单独指定固件"，而且当场内还有第二台接收固件时直接拒绝开始 —— 宁可不灌，也不把 A 板的固件写进 B 板。
+
+失败与中断的兜底：新槽写完才切启动分区，切换时把旧槽一起登记，所以传一半断电、按取消、新固件自检不过，都会回到旧固件。节点卡在接收固件模式时，重新扫描会出现"接收中"标记，此时跳过触发直接续传。
+
+> 网关自身与 WIFI 板的触发方式不同（UART 控制台 `ota` / TCP 收 `"OTA!"`），本页只管 EMG 与 IMU 这两类 BLE 外围。
 
 ---
 
-## 10. 已知限制
+## 10. 测试与验证
+
+```sh
+.venv/bin/python -m pytest -q          # 114 个用例
+.venv/bin/python -m semg_desktop selftest
+```
+
+覆盖：协议行级/字节级解析与失步恢复、ANSI/日志前缀、IMU 多行配对与截断、seq 回绕与缺口、PLL 抗抖动、全速灌文件不压缩时标、环形缓冲回绕、包络/RMS/iEMG/PSD 数值正确性、录制→回放→再解析的字节级闭环、TCP 源对真实 socket 的流式接收、OTA 分包与 ACK/CRC 与地址匹配与编排（不碰蓝牙硬件）、五个视图的离屏渲染冒烟。
+
+---
+
+## 11. 已知限制
 
 - **文本协议无校验**：字节丢失可能产生"合法但错误"的样本，只能靠统计量发现，不能纠正。要根治得在网关侧加长度+CRC 或改二进制输出（网关 README 也把这条列为后续方向）。
 - **协议无时间戳**：时标是重建的，跨通道对齐误差量级等于一次 read 的攒包时间（约几毫秒到几十毫秒），做通道间相位分析时要把这点考虑进去。
@@ -196,3 +249,4 @@ records/rec-YYYYmmdd-HHMMSS/
 - **无断线自动重连**：源报错就停并显示原因，需要手动重连，避免长时间录制里悄悄丢数据。
 - **磁力计不给航向**：JY931 原始 int16 未做硬磁/软磁标定，算出来的 heading 不可信，宁可不显示。
 - **sEMG 纵轴是 ADC 定点值**：节点侧上报的是滤波后截断到 int16 的定点数，固件没给电压换算关系，所以不做 mV 标定；削顶样本数会单独计数提示前端饱和。
+- **OTA 触发要节点空闲**：应用固件被连上就不广播，被网关占用期间无法触发升级；另外 BLE 走本机蓝牙适配器，适配器不可用或被别的栈占用时只能报"没搜到节点"，无法区分是链路问题还是节点没在广播。

@@ -47,6 +47,20 @@
     "output_rate_hz": 200.0,
     "psd_samples": 2048
   },
+  "ota": {
+    "receiver_name_prefix": "nimble-ble-ota",
+    "scan_timeout_seconds": 8.0,
+    "trigger_wait_seconds": 60.0,
+    "reboot_wait_seconds": 1.5,
+    "settle_seconds": 1.5,
+    "ack_timeout_seconds": 15.0,
+    "connect_timeout_seconds": 12.0,
+    "firmware_dir": "",
+    "default_bins": {
+      "semg": "",
+      "imu": ""
+    }
+  },
   "link": {
     "serial_capacity_bytes_per_second": 200000,
     "tcp_capacity_bytes_per_second": 11520

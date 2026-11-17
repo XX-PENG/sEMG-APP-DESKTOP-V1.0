@@ -12,7 +12,7 @@ if (-not (Test-Path $py)) {
     if ($hasUv) { uv venv .venv } else { python -m venv .venv }
 }
 
-& $py -c "import semg_desktop, PySide6, pyqtgraph, numpy, scipy, serial" 2>$null
+& $py -c "import semg_desktop, PySide6, pyqtgraph, numpy, scipy, serial, bleak" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "安装依赖（可编辑安装 + dev）"
     if ($hasUv) { uv pip install --python $py -e ".[dev]" } else { & $py -m pip install -e ".[dev]" }

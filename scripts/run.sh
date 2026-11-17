@@ -11,7 +11,7 @@ else
   [ -x "$py" ] || python3 -m venv .venv
 fi
 
-if ! "$py" -c "import semg_desktop, PySide6, pyqtgraph, numpy, scipy, serial" >/dev/null 2>&1; then
+if ! "$py" -c "import semg_desktop, PySide6, pyqtgraph, numpy, scipy, serial, bleak" >/dev/null 2>&1; then
   echo "安装依赖（可编辑安装 + dev）"
   if command -v uv >/dev/null 2>&1; then
     uv pip install --python "$py" -e ".[dev]"

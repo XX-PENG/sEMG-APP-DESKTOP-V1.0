@@ -1,4 +1,4 @@
-"""离屏渲染四个视图并导出 PNG。
+"""离屏渲染各视图并导出 PNG。
 
 没有显示器（CI、SSH）也能核对界面画得对不对：用模拟源灌一段真实格式的流，再逐个 tab
 grab 成图片。用法：
@@ -52,7 +52,7 @@ def main() -> int:
         time.sleep(0.01)
 
     win.emg.cb_span.setValue(args.span)
-    names = {0: "emg_stacked", 1: "imu", 2: "analysis", 3: "status"}
+    names = {0: "emg_stacked", 1: "imu", 2: "analysis", 3: "status", 4: "ota"}
     for index, name in names.items():
         win.tabs.setCurrentIndex(index)
         for _ in range(3):

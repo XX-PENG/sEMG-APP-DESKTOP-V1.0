@@ -356,6 +356,7 @@ class Acquisition:
                         "label": dev.label,
                         "kind": dev.info.kind,
                         "mac": dev.info.mac,
+                        "full_mac": dev.info.full_mac,
                         "slot": dev.info.slot,
                         "index": dev.index,
                         "online": dev.info.online and (age is None or age < 2.0),

@@ -55,6 +55,21 @@ class AnalyticsConfig:
 
 
 @dataclass
+class OtaConfig:
+    """EMG / IMU 节点 BLE 升级参数（协议见 ota.py）。"""
+
+    receiver_name_prefix: str = "nimble-ble-ota"
+    scan_timeout_seconds: float = 8.0
+    trigger_wait_seconds: float = 60.0
+    reboot_wait_seconds: float = 1.5
+    settle_seconds: float = 1.5
+    ack_timeout_seconds: float = 15.0
+    connect_timeout_seconds: float = 12.0
+    firmware_dir: str = ""
+    default_bins: dict[str, str] = field(default_factory=dict)  # {"semg": ..., "imu": ...}
+
+
+@dataclass
 class Config:
     buffer_seconds: float = 60.0
     display_span_seconds: float = 2.0
@@ -65,6 +80,7 @@ class Config:
     semg: SemgConfig = field(default_factory=SemgConfig)
     imu: ImuConfig = field(default_factory=ImuConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
+    ota: OtaConfig = field(default_factory=OtaConfig)
     link_capacity: dict[str, int] = field(
         default_factory=lambda: {"serial": 200_000, "tcp": 11_520}
     )
@@ -95,6 +111,7 @@ def load_config(path: str | Path | None = None) -> Config:
         semg=_sub(SemgConfig, raw.get("semg", {})),
         imu=_sub(ImuConfig, raw.get("imu", {})),
         analytics=_sub(AnalyticsConfig, raw.get("analytics", {})),
+        ota=_sub(OtaConfig, raw.get("ota", {})),
         link_capacity={
             "serial": int(link.get("serial_capacity_bytes_per_second", 200_000)),
             "tcp": int(link.get("tcp_capacity_bytes_per_second", 11_520)),

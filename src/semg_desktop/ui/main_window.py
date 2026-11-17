@@ -28,6 +28,7 @@ from .analysis_view import AnalysisView
 from .connect_dialog import ConnectDialog
 from .emg_view import EmgView
 from .imu_view import ImuView
+from .ota_view import OtaView
 from .status_panel import StatusPanel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -51,10 +52,12 @@ class MainWindow(QMainWindow):
         self.imu = ImuView(self.cfg)
         self.analysis = AnalysisView(self.cfg)
         self.status = StatusPanel(self.cfg)
+        self.ota = OtaView(self.cfg)
         self.tabs.addTab(self.emg, "实时曲线 (sEMG ×8)")
         self.tabs.addTab(self.imu, "IMU")
         self.tabs.addTab(self.analysis, "分析")
         self.tabs.addTab(self.status, "状态与链路")
+        self.tabs.addTab(self.ota, "固件升级 (OTA)")
         central = QWidget()
         lay = QVBoxLayout(central)
         lay.setContentsMargins(2, 2, 2, 2)
@@ -208,6 +211,8 @@ class MainWindow(QMainWindow):
             self.imu.set_latest(self.acq.imu_latest())
         elif self.tabs.currentWidget() is self.analysis:
             self.analysis.update_data(t_now)
+        elif self.tabs.currentWidget() is self.ota:
+            self.ota.set_devices(rows)
         self.status.update_data(st, rows, self.acq.status_log())
 
         if st.error and st.error != self._last_error:
@@ -221,7 +226,14 @@ class MainWindow(QMainWindow):
             )
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        if self.ota.busy and QMessageBox.question(
+                self, "正在升级", "固件还在传输中，关闭会中断这次写入。\n"
+                                 "没写完的新槽不会成为启动目标，旧槽仍可正常启动。\n\n确定关闭？"
+        ) != QMessageBox.Yes:
+            event.ignore()
+            return
         self.timer.stop()
+        self.ota.shutdown()
         self.disconnect_source()
         super().closeEvent(event)
 
