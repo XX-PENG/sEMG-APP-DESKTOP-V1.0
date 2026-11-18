@@ -39,6 +39,17 @@ python -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
 
 依赖：PySide6、pyqtgraph、numpy、scipy、pyserial、bleak（只做固件升级页用，缺它界面照样起，OTA 页会提示装）。
 
+打包 Windows 免安装 exe（onedir：exe + `_internal` 文件夹，整体拷贝即可分发）：
+
+```powershell
+uv pip install --python .venv\Scripts\python.exe pyinstaller
+.venv\Scripts\python.exe -m PyInstaller semg_desktop.spec --noconfirm
+# 产物：dist\semg-desktop\semg-desktop.exe
+```
+
+录制与通道映射写在 exe 旁的 `records/` 与 `_internal/config/`。构建前先关掉正在运行的
+semg-desktop.exe，否则 COLLECT 清理 dist 时会因 DLL 被占用而报 PermissionError。
+
 ---
 
 ## 2. 协议对照（已逐行核对网关源码）
@@ -115,7 +126,7 @@ host_time   = offset + device_time + i × period / n
 五个页签，数据只有一份，切页不重新采集。
 
 - **实时曲线**：8 通道堆叠 / 叠加 / 2×4 网格三种排布，峰值降采样 + 视口裁剪；可选叠加 4 Hz 包络；拖选区可直接喂给分析页；支持冻结画面读数。
-- **IMU**：加速度(g)/角速度(dps)/磁力计(原始) 三张子图 + 姿态方块（roll/pitch 由重力向量求，磁力计未标定所以不给航向）+ 9 分量当前值表。
+- **IMU**：加速度(g)/角速度(dps)/磁力计(原始) 三张子图 + 姿态方块（陀螺+加速度计 Mahony 互补滤波按样本率解算 roll/pitch/yaw；roll/pitch 由重力持续校正，yaw 仅靠陀螺积分会缓慢漂移，可航向归零）+ 9 分量当前值表。
 - **分析**：每通道样本数、实测速率、峰峰值、RMS、MAV、iEMG、int16 削顶计数；8 通道包络分层图；选中通道的 Welch 功率谱（对账 50 Hz 陷波是否生效很直接）。
 - **状态与链路**：设备表（在线、槽位、MAC、帧数、样本数、实测速率、最后 seq、drop、seq 缺口帧、重同步、缓冲、距今 ms）、链路速率与容量占用、12 项解析计数、判读提示、网关状态行原文。
 - **固件升级 (OTA)**：EMG / IMU 节点应用固件的 BLE 两阶段升级，详见第 9 节。

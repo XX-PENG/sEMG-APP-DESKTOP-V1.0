@@ -53,22 +53,35 @@ class SeriesRing:
         self._count = min(new_count, self.capacity)
 
     def window(self, t_from: float, t_to: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """只物化命中的窗口。
+
+        逻辑顺序上时标单调，但物理上最多分成两段连续区间，所以在两段上分别二分定位，
+        不先把整个缓冲拷出来——60 s × 2 kHz × 8 ch 的 sEMG 缓冲每帧全拷会拖垮 UI 线程。
+        """
         if self._count == 0:
-            empty = np.empty(0, dtype=np.float64)
-            v_shape = (0,) if self.n_fields == 1 else (0, self.n_fields)
-            return empty, np.empty(v_shape, dtype=np.float32)
+            return self._empty()
 
         start = (self._head - self._count) % self.capacity
-        idx = (start + np.arange(self._count)) % self.capacity
-        t = self._t[idx]
-        lo = int(np.searchsorted(t, t_from, side="left"))
-        hi = self._count if t_to is None else int(np.searchsorted(t, t_to, side="right"))
+        n1 = min(self._count, self.capacity - start)
+        n2 = self._count - n1
+        t1 = self._t[start : start + n1]
+        lo = int(np.searchsorted(t1, t_from, side="left"))
+        if lo == n1 and n2:
+            lo = n1 + int(np.searchsorted(self._t[:n2], t_from, side="left"))
+        if t_to is None:
+            hi = self._count
+        else:
+            hi = int(np.searchsorted(t1, t_to, side="right"))
+            if hi == n1 and n2:
+                hi = n1 + int(np.searchsorted(self._t[:n2], t_to, side="right"))
         if hi <= lo:
-            empty = np.empty(0, dtype=np.float64)
-            v_shape = (0,) if self.n_fields == 1 else (0, self.n_fields)
-            return empty, np.empty(v_shape, dtype=np.float32)
-        take = idx[lo:hi]
-        return self._t[take], self._v[take]
+            return self._empty()
+        idx = (start + np.arange(lo, hi)) % self.capacity
+        return self._t[idx], self._v[idx]
+
+    def _empty(self) -> tuple[np.ndarray, np.ndarray]:
+        shape = (0,) if self.n_fields == 1 else (0, self.n_fields)
+        return np.empty(0, dtype=np.float64), np.empty(shape, dtype=np.float32)
 
     def tail(self, count: int) -> tuple[np.ndarray, np.ndarray]:
         count = min(count, self._count)

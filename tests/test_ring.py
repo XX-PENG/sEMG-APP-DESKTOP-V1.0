@@ -62,3 +62,28 @@ def test_tail_returns_most_recent():
     r.append(np.arange(10.0), np.arange(10.0, dtype=np.float32))
     t, v = r.tail(3)
     assert list(t) == [7.0, 8.0, 9.0]
+
+
+def test_window_matches_full_scan_reference():
+    """分段二分定位必须与"全量拷出来再筛选"逐点等价，含跨容量回绕的各种边界。"""
+    r = SeriesRing(37, n_fields=3)
+    rng = np.random.default_rng(0)
+    t_end = 0.0
+    for _ in range(25):
+        n = int(rng.integers(1, 15))
+        times = t_end + np.arange(1, n + 1) * 0.01
+        r.append(times, rng.normal(size=(n, 3)).astype(np.float32))
+        t_end = float(times[-1])
+
+        tt, vv = r.tail(len(r))
+        span = tt[-1] - tt[0]
+        for frac in (0.0, 0.25, 0.5, 0.9, 1.0):
+            t_from = tt[0] + span * frac
+            for t_to in (None, t_from + 0.05, float(tt[-1]), t_from - 1.0):
+                mask = tt >= t_from
+                if t_to is not None:
+                    mask &= tt <= t_to
+                tw, vw = r.window(t_from, t_to)
+                assert np.array_equal(tw, tt[mask]), (t_from, t_to)
+                assert np.array_equal(vw, vv[mask]), (t_from, t_to)
+                assert vw.shape == (int(mask.sum()), 3)

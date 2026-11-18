@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .ahrs import AttitudeTracker
 from .analytics import EnvelopeEstimator, channel_metrics
 from .clock import DeviceClock
 from .config import Config
@@ -51,6 +52,8 @@ class DeviceState:
     restarts: int = 0
     stale: bool = False
     imu_latest: np.ndarray | None = None
+    imu_tracker: AttitudeTracker | None = None
+    imu_attitude: tuple[float, float, float] | None = None
     last_status_t: float = 0.0
 
     @property
@@ -215,6 +218,8 @@ class Acquisition:
 
         if isinstance(ev, ImuFrame):
             dev.imu_latest = values[-1]
+            dev.imu_tracker.feed(times, values)
+            dev.imu_attitude = dev.imu_tracker.attitude
         else:
             t_env, env = dev.env_est.update(times, values)
             if env.size:
@@ -254,6 +259,14 @@ class Acquisition:
                 env_est=EnvelopeEstimator(
                     cutoff_hz=self.cfg.analytics.envelope_cutoff_hz,
                     output_rate_hz=self.cfg.analytics.output_rate_hz,
+                ),
+                imu_tracker=(
+                    AttitudeTracker(
+                        nominal_dt=1.0 / self.cfg.protocol.imu_nominal_rate,
+                        cutoff_hz=self.cfg.imu.attitude_cutoff_hz,
+                    )
+                    if is_imu
+                    else None
                 ),
             )
             self.devices[key] = dev
@@ -323,6 +336,14 @@ class Acquisition:
             for dev in self.devices.values():
                 if dev.info.kind == "imu" and dev.imu_latest is not None:
                     return np.array(dev.imu_latest, dtype=np.float32)
+        return None
+
+    def imu_attitude(self) -> tuple[float, float, float] | None:
+        """最新 roll/pitch/yaw（deg）。元组不可变，可跨线程直接交给 UI。"""
+        with self.lock:
+            for dev in self.devices.values():
+                if dev.info.kind == "imu" and dev.imu_attitude is not None:
+                    return dev.imu_attitude
         return None
 
     def metrics(self, span: float, offset: float = 0.0) -> dict[int, object]:

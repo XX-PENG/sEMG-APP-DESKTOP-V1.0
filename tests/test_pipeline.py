@@ -189,3 +189,31 @@ def test_source_error_stops_cleanly(tmp_path):
     acq.source.open()
     with pytest.raises(SourceError):
         acq.pump(1024)
+
+
+def test_imu_attitude_tracks_yaw_from_gyro(tmp_path):
+    """绕重力轴旋转时加速度计读数不变，航向必须由陀螺积分给出。"""
+    lines = []
+    for seq in range(50):
+        lines.append(f"1/1 imu A4:CF:09 seq={seq} cnt=4 drop=0")
+        lines.extend(["0.000 0.000 1.000 0.000 0.000 90.000 0 0 0"] * 4)
+    path = tmp_path / "yaw.log"
+    path.write_text("\n".join(lines) + "\n")
+    acq = Acquisition(ReplaySource(path, pace=False), load_config(None))
+    acq.source.open()
+    drain(acq)
+    att = acq.imu_attitude()
+    assert att is not None
+    roll, pitch, yaw = att
+    assert abs(roll) < 0.5 and abs(pitch) < 0.5
+    # 50 帧 × 4 样本 × 5 ms = 1 s，90 dps 应转出 90°
+    assert yaw == pytest.approx(90.0, abs=1.0)
+
+
+def test_imu_attitude_absent_without_imu(tmp_path):
+    path = tmp_path / "semg_only.log"
+    path.write_text("1/1 semg A4:CF:01 seq=0 cnt=40 drop=0 " + " ".join(["7"] * 40) + "\n")
+    acq = Acquisition(ReplaySource(path, pace=False), load_config(None))
+    acq.source.open()
+    drain(acq)
+    assert acq.imu_attitude() is None

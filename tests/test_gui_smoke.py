@@ -45,6 +45,44 @@ def test_views_render_without_data(qapp, cfg):
     _KEEP.append(views)  # 让 Qt 对象活到会话结束：跨用例 GC 掉顶层窗口会在 offscreen 下踩坏
 
 
+def test_open_connect_ok_path_actually_connects(qapp, cfg, monkeypatch):
+    """回归：open_connect 曾漏导入 QDialog，OK 返回后抛 NameError 被 Qt 事件循环吞掉，
+    表现为对话框关闭但连接没建立、标题不变、无弹窗。"""
+    from PySide6.QtWidgets import QDialog
+
+    from semg_desktop.ui import connect_dialog as cd
+    from semg_desktop.ui.main_window import MainWindow
+
+    def fake_exec(self):
+        self.rb_sim.setChecked(True)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(cd.ConnectDialog, "exec", fake_exec)
+    win = MainWindow()
+    _KEEP.append(win)
+    win.open_connect()
+    assert win.acq is not None
+    assert win.act_disconnect.isEnabled()
+    win.disconnect_source()
+    win.close()
+
+
+def test_attitude_widget_renders_yaw_and_reset(qapp, cfg):
+    view = ImuView(cfg)
+    _KEEP.append(view)
+    view.show()
+    view.set_attitude((10.0, -5.0, 90.0))
+    qapp.processEvents()
+    assert not view.attitude.grab().isNull()  # 触发含 yaw 的 paintEvent
+    view.btn_yaw0.click()
+    qapp.processEvents()
+    assert not view.attitude.grab().isNull()
+    view.set_attitude((0.0, 0.0, 90.0))  # 归零后同一航向应画成 0°
+    qapp.processEvents()
+    assert not view.attitude.grab().isNull()
+    view.close()
+
+
 def test_connect_dialog_builds_sources(qapp, cfg):
     dlg = ConnectDialog(cfg)
     _KEEP.append(dlg)

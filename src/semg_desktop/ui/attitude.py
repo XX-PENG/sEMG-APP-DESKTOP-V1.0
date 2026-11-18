@@ -1,7 +1,8 @@
-"""加速度计姿态的简易 3D 显示。
+"""IMU 姿态的简易 3D 显示。
 
 不引入 PyOpenGL/VisPy：一个方框 + 三根轴，QPainter 做正交投影就够，代价是十几行矩阵。
-只用 roll/pitch，航向要硬磁标定才可信，协议里磁力计是未标定原始 int16，所以不给。
+姿态由 ahrs.MahonyAHRS 在采集线程按样本率解算后送进来，这里只负责画，不再做平滑——
+之前按 UI 帧率做的 EMA 是显示延迟的主要来源。
 """
 
 from __future__ import annotations
@@ -36,35 +37,31 @@ def _rot(axis: int, angle: float) -> np.ndarray:
     return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float64)
 
 
+def _wrap_deg(angle: float) -> float:
+    return (angle + 180.0) % 360.0 - 180.0
+
+
 class AttitudeWidget(QWidget):
-    def __init__(self, smoothing: float = 0.85, parent=None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setMinimumSize(200, 200)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._smooth = smoothing
-        self._accel = np.array([0.0, 0.0, 1.0])
-        self._gyro = np.zeros(3)
         self._roll = 0.0
         self._pitch = 0.0
+        self._yaw = 0.0
+        self._yaw0 = 0.0
 
-    def set_sample(self, accel: np.ndarray, gyro: np.ndarray | None = None) -> None:
-        if accel is None or accel.size != 3:
-            return
-        self._accel = self._smooth * self._accel + (1.0 - self._smooth) * np.asarray(accel, dtype=np.float64)
-        if gyro is not None and gyro.size == 3:
-            self._gyro = np.asarray(gyro, dtype=np.float64)
-        ax, ay, az = self._accel
-        self._roll = np.degrees(np.arctan2(ay, az))
-        self._pitch = np.degrees(np.arctan2(-ax, np.hypot(ay, az)))
+    def set_attitude(self, roll: float, pitch: float, yaw: float) -> None:
+        self._roll, self._pitch, self._yaw = float(roll), float(pitch), float(yaw)
         self.update()
 
-    @property
-    def angles(self) -> tuple[float, float]:
-        return float(self._roll), float(self._pitch)
+    def reset_yaw(self) -> None:
+        """把当前航向记为零点。磁力计未标定，yaw 靠陀螺积分会漂，只能人工归零。"""
+        self._yaw0 = self._yaw
+        self.update()
 
     def reset(self) -> None:
-        self._accel = np.array([0.0, 0.0, 1.0])
-        self._roll = self._pitch = 0.0
+        self._roll = self._pitch = self._yaw = self._yaw0 = 0.0
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt 命名
@@ -75,18 +72,20 @@ class AttitudeWidget(QWidget):
         cx, cy = w / 2.0, h / 2.0
         scale = 0.38 * min(w, h)
 
-        body = _rot(1, np.radians(self._pitch)) @ _rot(0, np.radians(self._roll))
+        yaw = _wrap_deg(self._yaw - self._yaw0)
+        body = (_rot(2, np.radians(yaw))
+                @ _rot(1, np.radians(self._pitch))
+                @ _rot(0, np.radians(self._roll)))
         view = _rot(0, _VIEW_PITCH) @ _rot(2, _VIEW_YAW)
 
-        def project(pts: np.ndarray) -> np.ndarray:
-            world = pts @ body.T
+        def screen(world: np.ndarray) -> np.ndarray:
             cam = world @ view.T
             out = np.empty((len(cam), 2))
             out[:, 0] = cx + cam[:, 0] * scale
             out[:, 1] = cy - cam[:, 2] * scale
             return out
 
-        verts = project(_BOX)
+        verts = screen(_BOX @ body.T)
         order = sorted(range(len(_FACES)), key=lambda k: np.mean([verts[i][1] for i in _FACES[k]]))
         for idx in order:
             path = QPainterPath()
@@ -99,21 +98,22 @@ class AttitudeWidget(QWidget):
             p.setPen(QPen(QColor(150, 190, 230, 150), 1))
             p.drawPath(path)
 
-        origin = project(np.zeros((1, 3)))[0]
+        origin = screen(np.zeros((1, 3)))[0]
         for vec, color in _AXES:
-            end = project(vec.reshape(1, 3))[0]
+            end = screen((vec @ body.T).reshape(1, 3))[0]
             p.setPen(QPen(color, 2))
             p.drawLine(int(origin[0]), int(origin[1]), int(end[0]), int(end[1]))
 
+        # 重力参考线固定在世界系，不能跟着 body 转，否则失去参考意义
         p.setPen(QPen(QColor(220, 220, 220, 140), 1, Qt.DashLine))
-        g = project(np.array([[0.0, 0.0, -1.05]]))[0]
+        g = screen(np.array([[0.0, 0.0, -1.05]]))[0]
         p.drawLine(int(origin[0]), int(origin[1]), int(g[0]), int(g[1]))
 
         p.setPen(QColor(230, 230, 230))
         f = p.font()
         f.setPointSize(9)
         p.setFont(f)
-        p.drawText(8, 18, f"roll {self._roll:+7.1f}°")
+        p.drawText(8, 18, f"roll  {self._roll:+7.1f}°")
         p.drawText(8, 34, f"pitch {self._pitch:+7.1f}°")
-        p.drawText(8, h - 10, f"|a| {np.linalg.norm(self._accel):.3f} g")
+        p.drawText(8, 50, f"yaw   {yaw:+7.1f}°")
         p.end()

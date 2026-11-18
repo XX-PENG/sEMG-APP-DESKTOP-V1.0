@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -54,7 +55,7 @@ class ImuView(QWidget):
                 ]
             )
 
-        self.attitude = AttitudeWidget(smoothing=0.9)
+        self.attitude = AttitudeWidget()
         self.tbl = QTableWidget(9, 2)
         self.tbl.setHorizontalHeaderLabels(["分量", "当前值"])
         self.tbl.verticalHeader().setVisible(False)
@@ -73,15 +74,19 @@ class ImuView(QWidget):
         self.chk_attitude = QCheckBox("姿态视图")
         self.chk_attitude.setChecked(True)
         self.chk_attitude.toggled.connect(self.attitude.setVisible)
+        self.btn_yaw0 = QPushButton("航向归零")
+        self.btn_yaw0.clicked.connect(self.attitude.reset_yaw)
 
         box = QGroupBox("IMU 读数")
         grid = QGridLayout(box)
         grid.addWidget(self.chk_mag, 0, 0)
         grid.addWidget(self.chk_auto_y, 0, 1)
         grid.addWidget(self.chk_attitude, 1, 0)
+        grid.addWidget(self.btn_yaw0, 1, 1)
         self.lbl_hint = QLabel(
             "换算依据网关侧还原：ax/ay/az = raw/1000 (g)，gx/gy/gz = raw/10 (dps)，"
-            "磁力计为原始 int16。roll/pitch 由重力向量求得，不含航向。"
+            "磁力计为原始 int16。姿态由陀螺+加速度计互补滤波按样本率解算；"
+            "roll/pitch 由重力持续校正，yaw 仅靠陀螺积分，会缓慢漂移，可用航向归零重置。"
         )
         self.lbl_hint.setWordWrap(True)
         self.lbl_hint.setStyleSheet("color:#aaa")
@@ -123,4 +128,7 @@ class ImuView(QWidget):
         for i in range(9):
             fmt = f"{vec[i]:.3f}" if i < 6 else f"{vec[i]:.0f}"
             self.tbl.setItem(i, 1, QTableWidgetItem(fmt))
-        self.attitude.set_sample(vec[:3], vec[3:6])
+
+    def set_attitude(self, att: tuple[float, float, float] | None) -> None:
+        if att is not None:
+            self.attitude.set_attitude(*att)

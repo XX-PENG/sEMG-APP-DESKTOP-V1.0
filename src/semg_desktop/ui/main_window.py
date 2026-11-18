@@ -10,6 +10,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QLabel,
     QMainWindow,
@@ -199,19 +200,19 @@ class MainWindow(QMainWindow):
         st = self.acq.stats()
         t_now = self.acq.now()
         rows = self.acq.device_rows()
-        span = self.emg.span
-        windows = self.acq.emg_windows(span)
-        envs = self.acq.env_windows(span)
+        current = self.tabs.currentWidget()
 
-        if self.tabs.currentWidget() is self.emg:
-            self.emg.update_data(windows, envs, t_now)
-        elif self.tabs.currentWidget() is self.imu:
+        if current is self.emg:
+            span = self.emg.span
+            self.emg.update_data(self.acq.emg_windows(span), self.acq.env_windows(span), t_now)
+        elif current is self.imu:
             t, samples = self.acq.imu_window(self.cfg.display_span_seconds)
             self.imu.update_data(t, samples, t_now)
             self.imu.set_latest(self.acq.imu_latest())
-        elif self.tabs.currentWidget() is self.analysis:
+            self.imu.set_attitude(self.acq.imu_attitude())
+        elif current is self.analysis:
             self.analysis.update_data(t_now)
-        elif self.tabs.currentWidget() is self.ota:
+        elif current is self.ota:
             self.ota.set_devices(rows)
         self.status.update_data(st, rows, self.acq.status_log())
 

@@ -43,7 +43,7 @@ class SemgConfig:
 @dataclass
 class ImuConfig:
     show_magnetometer: bool = True
-    attitude_cutoff_hz: float = 1.0
+    attitude_cutoff_hz: float = 0.3  # 重力校正陀螺的互补滤波交越频率；越低越跟手、越易漂
 
 
 @dataclass
