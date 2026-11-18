@@ -34,8 +34,8 @@ class ConnectDialog(QDialog):
         self.setWindowTitle("选择数据源")
         self.setMinimumWidth(520)
 
-        self.rb_serial = QRadioButton("蓝牙网关 USB 串口")
-        self.rb_tcp = QRadioButton("WIFI 网关 TCP 透传")
+        self.rb_serial = QRadioButton("USB 串口")
+        self.rb_tcp = QRadioButton("TCP 透传")
         self.rb_replay = QRadioButton("回放原始日志")
         self.rb_sim = QRadioButton("内置模拟信号")
         self.rb_serial.setChecked(True)
@@ -64,8 +64,6 @@ class ConnectDialog(QDialog):
         f.addRow("端口", row)
         f.addRow("", self.lbl_ports)
         f.addRow("波特率", self.sp_baud)
-        f.addRow("", QLabel("ESP32-S3 原生 USB 口走 USB-Serial/JTAG 从控制台，波特率被驱动忽略；\n"
-                            "接 UART0/TTL 时按网关实际配置填，当前入库 sdkconfig 是 115200。"))
 
         self.ed_host = QLineEdit(cfg.tcp.host)
         self.sp_port = QSpinBox()
@@ -75,8 +73,6 @@ class ConnectDialog(QDialog):
         f = QFormLayout(tcp_panel)
         f.addRow("地址", self.ed_host)
         f.addRow("端口", self.sp_port)
-        f.addRow("", QLabel(f"WIFI 网关 UART1 为 115200 8N1，约 {cfg.link_capacity['tcp']:,} B/s，\n"
-                            "全量文本必然丢样，只适合看趋势或降密度输出。"))
 
         self.ed_file = QLineEdit()
         self.btn_file = QPushButton("浏览…")

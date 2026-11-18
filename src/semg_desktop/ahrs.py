@@ -119,7 +119,9 @@ class AttitudeTracker:
             if not 0.0 < dt <= _MAX_GAP_S:
                 dt = fallback
             last_t = t
-            self._ahrs.update(row[0], row[1], row[2], row[3], row[4], row[5], dt)
+            # JY931 加速度输出的是重力向量（静置 az≈-1）而非比力（az≈+1），融合前整体取反；
+            # 陀螺仍是右手系不动。只翻加速度而不翻陀螺，否则 pitch/yaw 转向会反向
+            self._ahrs.update(-row[0], -row[1], -row[2], row[3], row[4], row[5], dt)
         self._last_t = last_t
 
     @property

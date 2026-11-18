@@ -5,7 +5,7 @@
 WIFI 网关（`sEMG-WIFI-ESP32-V1.0`）只做 UART↔TCP 透传，所以本工具把 `TCP:3333` 当作同一条字节流的另一种载体，解析逻辑完全共用。
 
 ```
-sEMG/IMU 节点 ──BLE Notify──> 蓝牙网关(ESP32-S3) ──printf 文本行──┬─> USB 串口(2M/115200) ─> 本工具 SerialSource
+sEMG/IMU 节点 ──BLE Notify──> 蓝牙网关(ESP32-S3) ──printf 文本行──┬─> USB 串口(2M) ─> 本工具 SerialSource
                                                                   └─> UART1 115200 ─> WIFI 网关 ─> TCP:3333 ─> 本工具 TcpSource
                                                                                                     本地日志文件 ─> ReplaySource
                                                                                                     内置模拟器    ─> SimulateSource
@@ -107,15 +107,12 @@ host_time   = offset + device_time + i × period / n
 | 1 路 IMU（10 组×9 字段） | ≈ 46 B + 10×55 B ≈ 596 B | 50 帧/s | ≈ 30 KB/s |
 | **合计 8+1** | | | **≈ 136 KB/s** |
 
-对照三条物理链路：
+对照两条物理链路：
 
 | 载体 | 容量 | 结论 |
 | --- | --- | --- |
-| ESP32-S3 原生 USB（USB-Serial/JTAG 从控制台） | USB 块传输，与 UART 波特率无关 | 唯一能跑满 8+1 的路径 |
 | UART0 @ 2 000 000 | ≈ 200 KB/s | 勉强够，占用约 68%，网关打印任务仍会偶发 `print queue overflow` |
 | UART0 / WIFI 网关 UART1 @ 115 200 | ≈ 11.5 KB/s | 差 12 倍，只能保住不到 1 路，必然大量丢样 |
-
-> ⚠️ 实测配置不一致：网关 `README.md` 与 `sdkconfig.defaults` 写 2 M，但**当前入库的 `sdkconfig` 是 `CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200`**。接 UART 前先用 `idf.py menuconfig` 确认，或直接用 S3 的原生 USB 口。
 
 界面因此把链路速率做成一等公民：状态页显示实测 B/s、容量占用条（>85% 变红）、以及网关自己报的 `overflow` 次数，"是不是链路不够"一眼能判断，不用猜。
 

@@ -140,17 +140,27 @@ def test_tracker_uses_reconstructed_timestamps():
     assert tracker.attitude is None
     n = 200
     times = np.arange(n, dtype=np.float64) * DT
-    samples = np.tile(np.array([0, 0, 1, 0, 0, 90, 0, 0, 0], dtype=np.float32), (n, 1))
+    # 传感器系：静置 az=-1（重力向量）；陀螺与显示系同向，+90dps 绕 Z
+    samples = np.tile(np.array([0, 0, -1, 0, 0, 90, 0, 0, 0], dtype=np.float32), (n, 1))
     tracker.feed(times, samples)
     roll, pitch, yaw = tracker.attitude
     assert yaw == pytest.approx(90.0, abs=1.0)
     assert abs(roll) < 0.5 and abs(pitch) < 0.5
 
 
+def test_tracker_negates_gravity_vector_accel():
+    """JY931 加速度输出重力向量（静置 az=-1），取反后必须对齐到 roll≈0 而不是 180°。"""
+    tracker = AttitudeTracker(nominal_dt=DT)
+    row = np.array([[0.0, 0.0, -1.0, 0, 0, 0, 0, 0, 0]], dtype=np.float32)
+    tracker.feed(np.array([0.0]), row)
+    roll, pitch, yaw = tracker.attitude
+    assert abs(roll) < 0.5 and abs(pitch) < 0.5 and abs(yaw) < 0.5
+
+
 def test_tracker_clamps_timestamp_jump():
     """重连/重同步会让时标跳变，一次大 dt 不能把姿态甩飞。"""
     tracker = AttitudeTracker(nominal_dt=DT, cutoff_hz=0.3)
-    row = np.array([[0, 0, 1, 0, 0, 90, 0, 0, 0]], dtype=np.float32)
+    row = np.array([[0, 0, -1, 0, 0, 90, 0, 0, 0]], dtype=np.float32)
     tracker.feed(np.array([0.0]), row)
     tracker.feed(np.array([0.005]), row)
     steady = tracker.attitude[2]
@@ -162,3 +172,20 @@ def test_tracker_empty_frame_is_noop():
     tracker = AttitudeTracker(nominal_dt=DT)
     tracker.feed(np.empty(0), np.empty((0, 9), dtype=np.float32))
     assert tracker.attitude is None
+
+
+@pytest.mark.parametrize("omega", [(45.0, 0.0, 0.0), (0.0, 60.0, 0.0), (0.0, 0.0, 90.0)])
+def test_tracker_all_axis_senses_match_display(omega):
+    """加速度取反、陀螺不动后，绕三个轴的转向都应与显示系一致（曾出现 X 对、Y/Z 反）。"""
+    tracker = AttitudeTracker(nominal_dt=DT, cutoff_hz=0.3)
+    w = np.radians(omega)
+    steps = int(1.0 * RATE)
+    times = np.arange(steps, dtype=np.float64) * DT
+    samples = np.empty((steps, 9), dtype=np.float32)
+    for i in range(steps):
+        R = rotvec(w * (i * DT))
+        a = R.T @ np.array([0.0, 0.0, 1.0])  # 显示系重力向上
+        samples[i, 0:3] = -a  # 传感器输出重力向量，整体取反
+        samples[i, 3:6] = omega  # 陀螺与显示系同向
+    tracker.feed(times, samples)
+    assert_angles_close(tracker.attitude, euler_of(rotvec(w * 1.0)), 1.5)

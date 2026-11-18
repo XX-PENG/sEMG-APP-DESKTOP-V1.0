@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.cfg: Config = load_config(config_path)
         self.config_path = config_path
-        self.channel_map = ChannelMap(self.cfg.channel_map)
+        self.channel_map = self._channel_map_for(source)
         self.acq: Acquisition | None = None
         self.rec: Recording | None = None
         self._last_error: str | None = None
@@ -121,7 +121,17 @@ class MainWindow(QMainWindow):
     def open_records(self) -> None:
         webbrowser.open(self.records_root().as_uri())
 
+    def _channel_map_for(self, source) -> ChannelMap:
+        # 模拟源 MAC 是假的：不继承真实设备的预留槽位（否则假 MAC 溢出到越界号，首页整片空白），
+        # 也不把越界的旧映射带进来
+        if getattr(source, "name", "") == "simulate":
+            return ChannelMap()
+        return ChannelMap(
+            {k: v for k, v in self.cfg.channel_map.items() if v < self.cfg.semg.channel_count}
+        )
+
     def connect_source(self, source) -> None:
+        self.channel_map = self._channel_map_for(source)
         acq = Acquisition(source, self.cfg, self.channel_map)
         try:
             acq.start()
@@ -145,12 +155,14 @@ class MainWindow(QMainWindow):
         self.stop_recording()
         self.acq.stop()
         rows = self.acq.device_rows()
-        self.cfg.channel_map = self.channel_map.as_dict()
-        if self.config_path:
-            try:
-                save_channel_map(self.config_path, self.cfg.channel_map)
-            except OSError as exc:
-                self.lbl_status.setText(f"通道映射写入失败：{exc}")
+        # 模拟源的 MAC 是假的，写回配置会把真实通道位置挤到看不见的越界号上
+        if getattr(self.acq.source, "name", "") != "simulate":
+            self.cfg.channel_map = self.channel_map.as_dict()
+            if self.config_path:
+                try:
+                    save_channel_map(self.config_path, self.cfg.channel_map)
+                except OSError as exc:
+                    self.lbl_status.setText(f"通道映射写入失败：{exc}")
         self.lbl_status.setText(
             f"已断开：{len([r for r in rows if r['kind'] == 'semg'])} 路 sEMG、"
             f"{len([r for r in rows if r['kind'] == 'imu'])} 路 IMU"

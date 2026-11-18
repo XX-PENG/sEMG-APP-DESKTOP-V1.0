@@ -182,8 +182,7 @@ class StatusPanel(QWidget):
         if st.utilization > 0.85 and st.capacity_bytes_per_second:
             notes.append(
                 "文本流量已逼近链路容量：网关打印任务跟不上时会丢帧并打印 print queue overflow。"
-                "优先走 ESP32-S3 原生 USB（USB-Serial/JTAG 从控制台，与 UART 波特率无关），"
-                "或降低打印密度、改二进制协议。"
+                "可降低打印密度或改二进制协议。"
             )
         if st.parse.imu_block_truncated:
             notes.append(f"IMU 块截断 {st.parse.imu_block_truncated} 次：数据行数少于 cnt，"

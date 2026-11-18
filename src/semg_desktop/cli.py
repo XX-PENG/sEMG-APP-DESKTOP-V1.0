@@ -183,7 +183,13 @@ def _add_common(p: argparse.ArgumentParser) -> None:
 
 
 def _default_config_path() -> str | None:
-    for cand in (Path("config/default.json"), Path(__file__).resolve().parents[2] / "config" / "default.json"):
+    cands = [Path("config/default.json")]
+    if getattr(sys, "frozen", False):
+        # 打包后配置随 datas 落在 _internal/config/，即 sys._MEIPASS 下；
+        # 不找它会让 load_config(None) 用默认值（配色全白）启动
+        cands.append(Path(sys._MEIPASS) / "config" / "default.json")
+    cands.append(Path(__file__).resolve().parents[2] / "config" / "default.json")
+    for cand in cands:
         if cand.is_file():
             return str(cand)
     return None

@@ -196,7 +196,8 @@ def test_imu_attitude_tracks_yaw_from_gyro(tmp_path):
     lines = []
     for seq in range(50):
         lines.append(f"1/1 imu A4:CF:09 seq={seq} cnt=4 drop=0")
-        lines.extend(["0.000 0.000 1.000 0.000 0.000 90.000 0 0 0"] * 4)
+        # 传感器静置 az=-1（重力向量）；陀螺与显示系同向 +90dps 绕 Z
+        lines.extend(["0.000 0.000 -1.000 0.000 0.000 90.000 0 0 0"] * 4)
     path = tmp_path / "yaw.log"
     path.write_text("\n".join(lines) + "\n")
     acq = Acquisition(ReplaySource(path, pace=False), load_config(None))

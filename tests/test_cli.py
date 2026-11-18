@@ -29,5 +29,20 @@ def test_cli_parse_on_generated_log(tmp_path, capsys):
     assert "2000.0/s" in out
 
 
+def test_default_config_path_finds_bundled_config(tmp_path, monkeypatch):
+    """回归：冻结态配置在 _MEIPASS/config/，漏找会回落默认值（配色全白）。"""
+    from semg_desktop import cli
+
+    bundled = tmp_path / "bundle" / "config" / "default.json"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("{}", encoding="utf-8")
+    empty_cwd = tmp_path / "cwd"
+    empty_cwd.mkdir()
+    monkeypatch.chdir(empty_cwd)
+    monkeypatch.setattr(cli.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(cli.sys, "_MEIPASS", str(tmp_path / "bundle"), raising=False)
+    assert cli._default_config_path() == str(bundled)
+
+
 def test_cli_ports_runs(capsys):
     assert main(["ports"]) == 0
