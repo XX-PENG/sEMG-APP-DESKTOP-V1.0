@@ -217,7 +217,7 @@ records/rec-YYYYmmdd-HHMMSS/
    - **不给网关断电**：先点开始升级，再把网关搬远/关进金属柜 —— 网关侧监督超时是 4 s（`main.c` 里 `supervision_timeout = 400`），断开后节点立刻恢复广播，阶段 1 会在 `trigger_wait_seconds`（默认 60 s）内持续扫描并自动抢下这次连接；进阶段 2 后把网关搬回来也不影响，网关不认 `nimble-ble-ota`；
    - 节点本来就卡在接收固件模式（上次升级中断）：阶段 1 会识别出来并跳过触发直接续传。
 3. 打开"固件升级 (OTA)"页 → 选 EMG / IMU 固件 → **扫描 BLE 节点** → 勾选 → 开始升级。
-4. 阶段 2 不用管网关：网关只连 `sEMG-ESP32*` / `IMU-ESP32*`，不会去抢 `nimble-ble-ota`。
+4. 阶段 2 不用管网关：网关只连 `EMG-*` / `IMU-*`（兼容旧 `sEMG-*`），不会去抢 `nimble-ble-ota`。
 
 设备行按 MAC 后 3 字节归并，两个来源合成一张表：
 

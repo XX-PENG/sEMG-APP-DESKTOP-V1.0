@@ -17,7 +17,7 @@
 
 * 应用固件只在**没有连接**时广播（bleprph 只在断开/连接失败后重新 advertise）。节点被网关连着的时候
   上位机搜不到它，也就写不进触发字——升级前先让节点单独上电或把网关断开。
-* 接收固件阶段不受这条约束影响：网关只连 `sEMG-ESP32*` / `IMU-ESP32*`，不会去抢 `nimble-ble-ota`。
+* 接收固件阶段不受这条约束影响：网关只连 `EMG-*` / `IMU-*`（兼容旧 `sEMG-*`），不会去抢 `nimble-ble-ota`。
 """
 
 from __future__ import annotations
@@ -57,7 +57,9 @@ ACK_LEN = 20
 ACK_STATUS_AT = 2
 ACK_CRC_AT = 18
 
-APP_NAME_PREFIX = {"semg": "sEMG-ESP32", "imu": "IMU-ESP32"}
+APP_NAME_PREFIX = {"semg": "EMG", "imu": "IMU"}
+# 识别时兼容旧前缀：sEMG-（含更旧的 sEMG-ESP32-），升级过渡期新旧固件都能认
+APP_NAME_ALIASES = {"semg": ("EMG", "sEMG"), "imu": ("IMU",)}
 RECEIVER_NAME_PREFIX = "nimble-ble-ota"
 OTA_SLOT_BYTES = 0x200_000     # partitions.csv 里 ota_0 / ota_1 各 2 MB
 ESP_IMAGE_MAGIC = 0xE9
@@ -203,8 +205,8 @@ class Advert:
     @property
     def kind(self) -> str | None:
         upper = self.name.upper()
-        for kind, prefix in APP_NAME_PREFIX.items():
-            if upper.startswith(prefix.upper()):
+        for kind, prefixes in APP_NAME_ALIASES.items():
+            if any(upper.startswith(p.upper()) for p in prefixes):
                 return kind
         return None
 
@@ -233,7 +235,10 @@ class OtaNode:
     @property
     def app_name(self) -> str:
         prefix = APP_NAME_PREFIX.get(self.kind, "")
-        return f"{prefix}-{self.suffix.replace(':', '')}" if prefix and self.suffix else prefix
+        if not prefix:
+            return ""
+        raw = (self.address or self.suffix).replace(":", "")
+        return f"{prefix}-{raw}" if raw else prefix
 
     @property
     def identity(self) -> str:
@@ -255,9 +260,21 @@ def node_from_advert(adv: Advert) -> OtaNode | None:
 
 
 def _suffix_from_name(name: str, kind: str) -> str:
-    prefix = APP_NAME_PREFIX.get(kind, "")
-    tail = name[len(prefix):].lstrip("-_") if prefix and name.upper().startswith(prefix.upper()) else ""
+    """从广播名还原 MAC 后 3 字节（与网关数据行的后缀一致）。
+
+    新名字带全 6 字节 MAC（EMG-DCB4D9281246），取后 3 字节；旧名字 sEMG-ESP32-xxxxxx 也兼容。
+    """
+    upper = name.upper()
+    tail = ""
+    for p in APP_NAME_ALIASES.get(kind, ()):
+        if upper.startswith(p.upper()):
+            tail = name[len(p):].lstrip("-_")
+            break
+    if tail.upper().startswith("ESP32-"):
+        tail = tail[len("ESP32-"):]
     digits = "".join(c for c in tail if c.isalnum())
+    if len(digits) == 12:
+        digits = digits[6:]
     if len(digits) == 6:
         return ":".join(digits[i:i + 2].upper() for i in (0, 2, 4))
     return ""
@@ -274,10 +291,10 @@ def match_app(adverts: Iterable[Advert], node: OtaNode, prefix: str = RECEIVER_N
         for a in advs:
             if a.address.upper() == node.address.upper():
                 return a
-    name = node.app_name.upper()
-    if name:
+    # 名字兜底：比"名里的 MAC 后 3 字节"，新旧名字格式（全 MAC / 旧 3 字节）都认得
+    if node.suffix:
         for a in advs:
-            if a.name.upper().startswith(name):
+            if a.kind == node.kind and _suffix_from_name(a.name, node.kind) == node.suffix:
                 return a
     return None
 

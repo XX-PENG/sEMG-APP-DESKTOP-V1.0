@@ -115,7 +115,7 @@ def test_node_from_gateway_row_uses_full_mac_as_address():
     node = ota.node_from_row(row)
     assert node.kind == "semg"
     assert node.address == "AA:BB:CC:A4:CF:01"
-    assert node.app_name == "sEMG-ESP32-A4CF01"
+    assert node.app_name == "EMG-AABBCCA4CF01"
     assert node.key == "semg@a4cf01"
 
 
@@ -125,32 +125,35 @@ def test_node_key_respects_ui_uid():
 
 
 def test_node_from_advert_derives_kind_and_suffix():
-    node = ota.node_from_advert(ota.Advert(name="IMU-ESP32-123490", address="AA:BB:CC:12:34:90"))
+    node = ota.node_from_advert(ota.Advert(name="IMU-AABBCC123490", address="AA:BB:CC:12:34:90"))
     assert node is not None and node.kind == "imu"
     assert node.suffix == "12:34:90"
     assert ota.node_from_advert(ota.Advert(name="nimble-ble-ota", address="AA:BB:CC:12:34:90")) is None
 
 
 def test_suffix_from_name_when_address_missing():
-    # 广播名是唯一线索时也要还原成 "A4:CF:01" 形式
+    # 新名字带全 MAC，取后 3 字节；旧名字 sEMG-ESP32-xxxxxx 也兼容
+    assert ota._suffix_from_name("EMG-aabbcca4cf01", "semg") == "A4:CF:01"
+    assert ota._suffix_from_name("sEMG-aabbcca4cf01", "semg") == "A4:CF:01"
     assert ota._suffix_from_name("sEMG-ESP32-a4cf01", "semg") == "A4:CF:01"
-    assert ota._suffix_from_name("sEMG-ESP32", "semg") == ""
+    assert ota._suffix_from_name("sEMG", "semg") == ""
     assert ota._suffix_from_name("其他设备", "semg") == ""
 
 
 def test_match_app_prefers_address_over_name():
     node = ota.OtaNode(kind="semg", suffix="A4:CF:01", address="AA:BB:CC:A4:CF:01")
     advs = [
-        ota.Advert(name="sEMG-ESP32-A4CF01", address="11:22:33:A4:CF:01"),   # 同名不同址，干扰项
-        ota.Advert(name="IMU-ESP32-123490", address="AA:BB:CC:A4:CF:01"),    # 同址，真身
+        ota.Advert(name="EMG-112233A4CF01", address="11:22:33:A4:CF:01"),   # 同后缀不同址，干扰项
+        ota.Advert(name="IMU-AABBCCA4CF01", address="AA:BB:CC:A4:CF:01"),    # 同址，真身
     ]
     assert ota.match_app(advs, node).address == "AA:BB:CC:A4:CF:01"
 
 
 def test_match_app_falls_back_to_name():
     node = ota.OtaNode(kind="semg", suffix="A4:CF:01")
+    assert ota.match_app([ota.Advert(name="EMG-AABBCCA4CF01", address="AA:BB:CC:A4:CF:01")], node)
     assert ota.match_app([ota.Advert(name="sEMG-ESP32-A4CF01", address="AA:BB:CC:A4:CF:01")], node)
-    assert ota.match_app([ota.Advert(name="sEMG-ESP32-999999", address="1")], node) is None
+    assert ota.match_app([ota.Advert(name="sEMG-FFFFFFFFFF", address="1")], node) is None
 
 
 def test_match_receiver_locks_by_address_and_refuses_to_guess():
@@ -182,8 +185,8 @@ def test_match_app_ignores_receiver_sharing_the_same_address():
     receiver_only = [ota.Advert(name="nimble-ble-ota", address="AA:BB:CC:34:2B:FA")]
     assert ota.match_app(receiver_only, node) is None
     both = [ota.Advert(name="nimble-ble-ota", address="AA:BB:CC:34:2B:FA"),
-            ota.Advert(name="IMU-ESP32-342BFA", address="AA:BB:CC:34:2B:FA")]
-    assert ota.match_app(both, node).name == "IMU-ESP32-342BFA"
+            ota.Advert(name="IMU-AABBCC342BFA", address="AA:BB:CC:34:2B:FA")]
+    assert ota.match_app(both, node).name == "IMU-AABBCC342BFA"
 
 
 def _fw_with_desc(version: str = "test-1.0", sha: bytes = bytes(range(32))) -> bytes:
@@ -239,7 +242,7 @@ class FakeApp:
 
 
 def _patch_app_scan(monkeypatch, client):
-    adv = ota.Advert(name="IMU-ESP32-342BFA", address="DC:B4:D9:34:2B:FA")
+    adv = ota.Advert(name="IMU-DCB4D9342BFA", address="DC:B4:D9:34:2B:FA")
 
     async def fake_discover(timeout, stop_when=None):
         return [adv]
@@ -305,7 +308,7 @@ def test_verify_app_retries_when_windows_serves_a_stale_table(monkeypatch):
         async def read_gatt_char(self, char):
             return payload
 
-    adv = ota.Advert(name="IMU-ESP32-342BFA", address="DC:B4:D9:34:2B:FA")
+    adv = ota.Advert(name="IMU-DCB4D9342BFA", address="DC:B4:D9:34:2B:FA")
 
     async def fake_discover(timeout, stop_when=None):
         return [adv]
@@ -335,13 +338,13 @@ def test_scan_summary_turns_not_found_into_actionable_diagnosis():
     assert "名字是" in ota.scan_summary(node, wrong_name, "nimble-ble-ota")
 
     crowd = [
-        ota.Advert(name="IMU-ESP32-111111", address="11:22:33:11:11:11"),
-        ota.Advert(name="sEMG-ESP32-A4CF01", address="11:22:33:A4:CF:01"),
+        ota.Advert(name="IMU-112233111111", address="11:22:33:11:11:11"),
+        ota.Advert(name="EMG-112233A4CF01", address="11:22:33:A4:CF:01"),
         ota.Advert(name="nimble-ble-ota", address="11:22:33:DE:AD:BE"),
     ]
     text = ota.scan_summary(node, crowd, "nimble-ble-ota")
     assert "扫描到 3 个广播" in text
-    assert "同类型节点在广播的有 1 台：IMU-ESP32-111111" in text  # 只点名同类，不被 sEMG 干扰
+    assert "同类型节点在广播的有 1 台：IMU-112233111111" in text  # 只点名同类，不被 sEMG 干扰
     assert "另有 1 台已在接收固件模式" in text
     assert "被网关连着" in text
 
@@ -443,7 +446,7 @@ def _patch_ble(monkeypatch, rounds):
 
 def test_phase1_polls_until_the_node_goes_free(monkeypatch):
     """前两轮空手（节点还被网关占着），第三轮网关断开 -> 自动抢下来触发，不用人重跑。"""
-    app = ota.Advert(name="IMU-ESP32-342BFA", address="AA:BB:CC:34:2B:FA")
+    app = ota.Advert(name="IMU-AABBCC342BFA", address="AA:BB:CC:34:2B:FA")
     calls = _patch_ble(monkeypatch, [[], [], [app]])
     _TriggerClient.writes = []
     node = ota.OtaNode(kind="imu", suffix="34:2B:FA", address="AA:BB:CC:34:2B:FA")
@@ -573,7 +576,7 @@ class _FakeScanner:
         self._callback = callback
 
     async def __aenter__(self):
-        self._callback(_FakeDev("IMU-ESP32-342BFA", "AA:BB:CC:34:2B:FA"), _FakeAdv("IMU-ESP32-342BFA"))
+        self._callback(_FakeDev("IMU-AABBCC342BFA", "AA:BB:CC:34:2B:FA"), _FakeAdv("IMU-AABBCC342BFA"))
         return self
 
     async def __aexit__(self, *exc):
@@ -589,7 +592,7 @@ def test_discover_returns_as_soon_as_the_target_shows_up(monkeypatch):
     advs = asyncio.run(ota._discover(5.0, stop_when=stop))
     assert time.monotonic() - t0 < 1.0
     assert [a.address for a in advs] == ["AA:BB:CC:34:2B:FA"]
-    assert [a.name for a in advs] == ["IMU-ESP32-342BFA"]
+    assert [a.name for a in advs] == ["IMU-AABBCC342BFA"]
 
 
 def test_discover_without_stop_waits_the_full_timeout(monkeypatch):
@@ -607,7 +610,7 @@ def test_scan_target_refuses_to_early_exit_on_ambiguous_receivers():
     assert stop(ota.Advert(name="nimble-ble-ota", address="AA:BB:CC:34:2B:FA"))
     assert not stop(ota.Advert(name="nimble-ble-ota", address="11:22:33:44:55:66"))
     assert ota.scan_target(with_addr, "nimble-ble-ota", want_app=True)(
-        ota.Advert(name="IMU-ESP32-342BFA", address="AA:BB:CC:34:2B:FA"))
+        ota.Advert(name="IMU-AABBCC342BFA", address="AA:BB:CC:34:2B:FA"))
 
 
 # ── 用假接收固件跑通整条链路（不需要蓝牙） ───────────────────────────────────
@@ -778,7 +781,7 @@ def test_sector_packets_raises_instead_of_overflowing_the_index():
 def test_upgrade_nodes_end_to_end(monkeypatch):
     fw = bytes((i * 13) & 0xFF for i in range(5000))
     node = ota.OtaNode(kind="semg", suffix="A4:CF:01", address="AA:BB:CC:A4:CF:01", uid="A4:CF:01")
-    app_adv = ota.Advert(name="sEMG-ESP32-A4CF01", address="AA:BB:CC:A4:CF:01")
+    app_adv = ota.Advert(name="EMG-AABBCCA4CF01", address="AA:BB:CC:A4:CF:01")
     rcv_adv = ota.Advert(name="nimble-ble-ota", address="AA:BB:CC:A4:CF:01")
     rounds = [[app_adv], [rcv_adv], [rcv_adv], [app_adv]]  # 最后一轮：传完后回到应用固件做校验
     calls: list[int] = []
@@ -862,7 +865,7 @@ def test_ota_view_merges_scan_into_same_row(qapp, cfg):
     view = OtaView(cfg)
     view.set_devices([{"kind": "semg", "mac": "A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01",
                        "label": "CH1"}])
-    view._on_scanned([ota_mod.Advert(name="sEMG-ESP32-A4CF01", address="AA:BB:CC:A4:CF:01")])
+    view._on_scanned([ota_mod.Advert(name="EMG-AABBCCA4CF01", address="AA:BB:CC:A4:CF:01")])
     assert len(view.rows) == 1
     assert "扫描" in view.rows["A4:CF:01"].source
 
@@ -887,7 +890,7 @@ def test_ota_view_threaded_scan_and_upgrade(qapp, cfg, tmp_path, monkeypatch):
     fw.write_bytes(b"\xe9" + bytes(2048))
     cfg.ota.default_bins = {"semg": str(fw), "imu": ""}
     monkeypatch.setattr(ota, "scan_adverts",
-                        lambda timeout=8.0: [ota.Advert(name="sEMG-ESP32-A4CF01",
+                        lambda timeout=8.0: [ota.Advert(name="EMG-AABBCCA4CF01",
                                                          address="AA:BB:CC:A4:CF:01")])
 
     def fake_upgrade(jobs, opts, rep):

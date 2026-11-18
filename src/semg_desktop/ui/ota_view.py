@@ -322,7 +322,7 @@ class OtaView(QWidget):
         for a in receivers[:6]:
             self._on_log(f"  · {a.address} 已在接收固件模式（可直接续传）")
         if not apps and not receivers:
-            self._on_log("  场上没有 sEMG-ESP32* / IMU-ESP32* 在广播：它们被网关连着时不广播，"
+            self._on_log("  场上没有 EMG-* / IMU-* 在广播：它们被网关连着时不广播，"
                          "请先断开网关或让节点单独上电")
 
     def _rebuild(self) -> None:
