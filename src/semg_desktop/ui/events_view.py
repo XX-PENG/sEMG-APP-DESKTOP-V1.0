@@ -10,7 +10,7 @@ import csv
 import json
 import time
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -43,6 +43,9 @@ class EventsView(QWidget):
         self.engine = None
         self._deleted: list[list[tuple[int, RiskEvent]]] = []
         self._visible: list[RiskEvent] = []
+        self._updating = False
+        self._sig: tuple | None = None
+        self._selected_ids: set[int] = set()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
@@ -102,13 +105,19 @@ class EventsView(QWidget):
         self.tbl = QTableWidget(0, len(COLS))
         self.tbl.setHorizontalHeaderLabels(COLS)
         self.tbl.verticalHeader().setVisible(False)
-        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # 固定行高 + 交互列宽：ResizeToContents 会在每次重建时对全部单元格求 sizeHint，
+        # 事件多了以后一次刷新就是几千次布局查询，叠加选择信号重入会把界面拖死。
+        self.tbl.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.tbl.verticalHeader().setDefaultSectionSize(26)
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        for c, w in enumerate((72, 96, 46, 70, 62, 40, 84, 66)):
+            self.tbl.setColumnWidth(c, w)
         self.tbl.horizontalHeader().setStretchLastSection(True)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl.setSelectionBehavior(QTableWidget.SelectRows)
         self.tbl.setSelectionMode(QTableWidget.ExtendedSelection)
-        self.tbl.itemSelectionChanged.connect(self._show_detail)
+        self.tbl.itemSelectionChanged.connect(self._on_selection)
         split.addWidget(self.tbl)
 
         right = QWidget()
@@ -188,24 +197,51 @@ class EventsView(QWidget):
         return rows
 
     def _refill(self, *_a) -> None:
-        self._visible = self._filtered()
-        self.tbl.setRowCount(len(self._visible))
-        for r, e in enumerate(self._visible):
-            vals = [f"{e.t:7.1f}s", e.name, e.level, f"{e.value:.1f}", f"{e.threshold:.1f}",
-                    e.side, e.drill, "已确认" if e.acknowledged else "待处置", e.note or "—"]
-            for c, text in enumerate(vals):
-                item = QTableWidgetItem(text)
-                if c in (0, 3, 4):
-                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if c == 2:
-                    item.setForeground(QColor(T.C["danger"] if e.level == "高" else T.C["warn"]))
-                if c == 7:
-                    item.setForeground(QColor(T.C["safe"] if e.acknowledged else T.C["muted"]))
-                self.tbl.setItem(r, c, item)
-        total = len(self.engine.events) if self.engine else 0
-        unack = sum(1 for e in (self.engine.events if self.engine else []) if not e.acknowledged)
-        self.lbl_count.setText(f"显示 {len(self._visible)} / 共 {total} · 待处置 {unack}")
-        self.btn_undo.setEnabled(bool(self._deleted))
+        if self._updating:
+            return
+        self._updating = True
+        try:
+            visible = self._filtered()
+            sig = tuple((e.id, round(e.t, 1), e.level, round(e.value, 1), round(e.threshold, 1),
+                         e.side, e.drill, e.acknowledged, e.note) for e in visible)
+            total = len(self.engine.events) if self.engine else 0
+            unack = sum(1 for e in (self.engine.events if self.engine else []) if not e.acknowledged)
+            self.lbl_count.setText(f"显示 {len(visible)} / 共 {total} · 待处置 {unack}")
+            self.btn_undo.setEnabled(bool(self._deleted))
+            if sig == self._sig and self.tbl.rowCount() == len(visible):
+                self._visible = visible
+                return                      # 内容没变就不重建，避免无谓的布局与信号风暴
+            old_sel = {self._visible[i.row()].id for i in self.tbl.selectedIndexes()
+                       if i.row() < len(self._visible)}
+            self._visible = visible
+            self._sig = sig
+            # 重建期间屏蔽选择信号：setItem/setRowCount 触发的 itemSelectionChanged 若
+            # 再回调进来读写同一张表，就是重入泥潭；统一在重建结束后恢复选择并刷一次明细。
+            self.tbl.blockSignals(True)
+            try:
+                self.tbl.setRowCount(len(visible))
+                for r, e in enumerate(visible):
+                    vals = [f"{e.t:7.1f}s", e.name, e.level, f"{e.value:.1f}", f"{e.threshold:.1f}",
+                            e.side, e.drill, "已确认" if e.acknowledged else "待处置", e.note or "—"]
+                    for c, text in enumerate(vals):
+                        item = QTableWidgetItem(text)
+                        if c in (0, 3, 4):
+                            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                        if c == 2:
+                            item.setForeground(QColor(T.C["danger"] if e.level == "高" else T.C["warn"]))
+                        if c == 7:
+                            item.setForeground(QColor(T.C["safe"] if e.acknowledged else T.C["muted"]))
+                        self.tbl.setItem(r, c, item)
+                self.tbl.clearSelection()
+                for r, e in enumerate(visible):
+                    if e.id in old_sel:
+                        self.tbl.selectRow(r)
+            finally:
+                self.tbl.blockSignals(False)
+            self._selected_ids = {e.id for e in self._selected()}
+            self._show_detail()
+        finally:
+            self._updating = False
 
     def refresh(self) -> None:
         self._refill()
@@ -214,9 +250,20 @@ class EventsView(QWidget):
         rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
         return [self._visible[r] for r in rows if r < len(self._visible)]
 
+    def _on_selection(self) -> None:
+        if self._updating:
+            return
+        self._selected_ids = {e.id for e in self._selected()}
+        # 明细刷新推迟到事件循环下一拍：不在选择信号里同步改控件，杜绝重入
+        QTimer.singleShot(0, self._show_detail)
+
     def _show_detail(self) -> None:
+        if self._updating:
+            return
         sel = self._selected()
         e = sel[0] if sel else None
+        if e is self._current and e is not None:
+            return                      # 同一条不重复刷，避免 30 Hz 下的无谓 setText
         self._current = e
         if e is None:
             self.lbl_head.setText("选择一条事件")
@@ -240,14 +287,19 @@ class EventsView(QWidget):
         self.changed.emit()
 
     def ack_one(self) -> None:
-        if self._current:
-            self._current.acknowledged = True
+        sel = self._selected()
+        e = sel[0] if sel else self._current
+        if e:
+            e.acknowledged = True
             self._refill()
             self.changed.emit()
 
     def save_note(self) -> None:
-        if self._current:
-            self._current.note = self.ed_note.toPlainText().strip()
+        sel = self._selected()
+        e = sel[0] if sel else self._current
+        if e:
+            e.note = self.ed_note.toPlainText().strip()
+            self._sig = None          # 备注进了签名，强制下次重建以反映到表格
             self._refill()
             self.changed.emit()
 

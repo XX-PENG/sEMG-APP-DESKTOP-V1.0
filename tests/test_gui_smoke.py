@@ -273,3 +273,42 @@ def test_events_bulk_ack_delete_undo(qapp, monkeypatch):
     win.toggle_session()
     win.disconnect_source()
     win.close()
+
+
+def test_events_click_detail_and_reentrancy_safe(qapp):
+    """回归：点击事件行要在下一拍刷出明细；选择信号里再触发重建也不得重入卡死。"""
+    win = MainWindow(source=AthleteSimSource(frame_period=0.01, fatigue_rate=14.0))
+    _KEEP.append(win)
+    _pump(qapp, win, 0.5)
+    win.toggle_session()
+    _pump(qapp, win, 6.0)
+    win._select_nav("events")
+    win.events.refresh()
+    assert win.events.tbl.rowCount() > 0
+
+    # 敌意重入：选择变化时同步再重建一次表（真实场景里刷新定时器与点击可能交错）
+    win.events.tbl.itemSelectionChanged.connect(win.events.refresh)
+    t0 = time.monotonic()
+    for r in range(min(6, win.events.tbl.rowCount())):
+        win.events.tbl.selectRow(r)
+        qapp.processEvents()
+    assert time.monotonic() - t0 < 5.0
+    qapp.processEvents()
+    assert "#" in win.events.lbl_head.text()      # 明细确实刷出来了
+    assert win.events._current is not None
+
+    # 大量事件下反复 选择+重建 仍要有界
+    from semg_desktop.guard.model import RiskEvent
+    for i in range(300):
+        win.engine.events.append(RiskEvent(
+            id=1000 + i, t=float(i), wall=time.time(), factor="asym", severity=0.8,
+            score=70, value=18.0, threshold=8.0, side="右", drill="直线冲刺", advice="x"))
+    t0 = time.monotonic()
+    for r in range(0, 300, 37):
+        win.events.tbl.selectRow(r % win.events.tbl.rowCount())
+        win.events.refresh()
+        qapp.processEvents()
+    assert time.monotonic() - t0 < 8.0
+    win.toggle_session()
+    win.disconnect_source()
+    win.close()
