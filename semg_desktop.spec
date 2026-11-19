@@ -22,6 +22,8 @@ hiddenimports = (
         "bleak.backends.winrt.client",
         "bleak.backends.winrt.scanner",
         "serial.tools.list_ports_windows",
+        # 场边提示音走 QSoundEffect；Qt 多媒体插件不被静态分析扫到
+        "PySide6.QtMultimedia",
     ]
 )
 

@@ -331,6 +331,14 @@ class Acquisition:
                     return dev.ring.window(t_to - span, t_to)
         return np.empty(0), np.empty((0, IMU_FIELDS), dtype=np.float32)
 
+    def imu_since(self, t_from: float) -> tuple[np.ndarray, np.ndarray]:
+        """取 t_from 之后的 IMU 样本，供步态状态机增量消费（不重复处理已看过的样本）。"""
+        with self.lock:
+            for dev in self.devices.values():
+                if dev.info.kind == "imu":
+                    return dev.ring.window(t_from, None)
+        return np.empty(0), np.empty((0, IMU_FIELDS), dtype=np.float32)
+
     def imu_latest(self) -> np.ndarray | None:
         with self.lock:
             for dev in self.devices.values():
@@ -361,6 +369,25 @@ class Acquisition:
             for dev in self.devices.values():
                 if dev.index == index and dev.info.kind == "semg":
                     return dev.ring.window(t_to - span, t_to)
+        return np.empty(0), np.empty(0, dtype=np.float32)
+
+    def emg_abs(self, index: int, t_from: float, t_to: float) -> tuple[np.ndarray, np.ndarray]:
+        """按绝对设备时标取原始 sEMG 窗。
+
+        步态锁定分析必须用绝对窗：span/offset 形式内部会重取 now()，而 now() 在分析
+        过程中还在前进，窗口会跟着漂几十毫秒——正好是末端摆动窗的量级。
+        """
+        with self.lock:
+            for dev in self.devices.values():
+                if dev.index == index and dev.info.kind == "semg":
+                    return dev.ring.window(t_from, t_to)
+        return np.empty(0), np.empty(0, dtype=np.float32)
+
+    def env_abs(self, index: int, t_from: float, t_to: float) -> tuple[np.ndarray, np.ndarray]:
+        with self.lock:
+            for dev in self.devices.values():
+                if dev.index == index and dev.info.kind == "semg":
+                    return dev.env_ring.window(t_from, t_to)
         return np.empty(0), np.empty(0, dtype=np.float32)
 
     def device_rows(self) -> list[dict]:

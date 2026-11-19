@@ -18,6 +18,7 @@ def _add_source_flags(p: argparse.ArgumentParser) -> None:
     g.add_argument("--tcp", metavar="HOST[:PORT]", help="WIFI 网关 TCP 透传地址，默认端口 3333")
     g.add_argument("--replay", metavar="FILE", help="回放原始文本日志（.txt/.log/.log.gz）")
     g.add_argument("--simulate", action="store_true", help="内置信号模拟，无需硬件")
+    g.add_argument("--athlete", action="store_true", help="运动员步态锁定模拟（默认 gui 源）")
 
 
 def build_source(args, cfg: Config):
@@ -29,6 +30,10 @@ def build_source(args, cfg: Config):
         return TcpSource(host, int(port or cfg.tcp.port), capacity_bytes_per_second=cfg.link_capacity["tcp"])
     if args.replay:
         return ReplaySource(args.replay, speed=args.speed, pace=not args.no_pace)
+    if getattr(args, "athlete", False):
+        from .sources import AthleteSimSource
+
+        return AthleteSimSource()
     return SimulateSource()
 
 
@@ -125,7 +130,8 @@ def cmd_gui(args) -> int:
     from .ui.app import run_gui
 
     cfg = load_config(args.config)
-    source = build_source(args, cfg) if args.source_given else None
+    given = any([args.serial, args.tcp, args.replay, args.simulate, getattr(args, "athlete", False)])
+    source = build_source(args, cfg) if given else None   # 不给源时主窗口默认运动员模拟
     return run_gui(config_path=args.config, source=source)
 
 
@@ -146,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     p_gui = sub.add_parser("gui", help="启动图形界面（默认子命令）")
     _add_source_flags(p_gui)
     _add_common(p_gui)
-    p_gui.set_defaults(func=cmd_gui, source_given=True)
+    p_gui.set_defaults(func=cmd_gui)
 
     p_st = sub.add_parser("selftest", help="用模拟源跑一遍解析+时标链路并自检")
     p_st.add_argument("--duration", type=float, default=3.0)
@@ -169,8 +175,6 @@ def main(argv: list[str] | None = None) -> int:
     p_ports.set_defaults(func=cmd_ports)
 
     args = parser.parse_args(argv)
-    if not any(getattr(args, k, None) for k in ("serial", "tcp", "replay", "simulate")):
-        args.source_given = False
     args.config = args.config or _default_config_path()
     return args.func(args)
 

@@ -1,6 +1,9 @@
-# sEMG-APP-DESKTOP-V1.0
+# sEMG-APP-DESKTOP-V1.0 · HAMSTRING GUARD
 
-跨平台（Windows / macOS）sEMG + IMU 实时上位机：直接读**蓝牙网关的串口文本输出**，画 8 路 sEMG 与 1 路 IMU 的实时曲线，同时做录制、回放、包络/频谱分析和链路健康判读。
+面向**曲棍球运动员腘绳肌损伤预防**的可穿戴多模态监测与实时反馈上位机（Windows / macOS）。
+底层读**蓝牙网关的串口文本输出**（8 路 sEMG + 1 路大腿 IMU），上层把信号翻译成运动医学量：
+肌肉激活 %MVC、H:Q 激活比、左右不对称、共激活、频谱疲劳（MDF 下移）、步态末端摆动离心负荷、
+激活时序与急性负荷比，合成一个**可解释的 0–100 拉伤风险指数**，并在场边给出实时干预指令。
 
 WIFI 网关（`sEMG-WIFI-ESP32-V1.0`）只做 UART↔TCP 透传，所以本工具把 `TCP:3333` 当作同一条字节流的另一种载体，解析逻辑完全共用。
 
@@ -19,7 +22,7 @@ sEMG/IMU 节点 ──BLE Notify──> 蓝牙网关(ESP32-S3) ──printf 文�
 
 ```powershell
 # Windows
-powershell -File scripts\run.ps1                      # 默认用内置模拟源起界面
+powershell -File scripts\run.ps1                      # 默认用运动员步态锁定模拟起界面
 powershell -File scripts\run.ps1 gui --serial COM7    # 接蓝牙网关
 powershell -File scripts\run.ps1 selftest             # 无硬件自检整条解析链路
 ```
@@ -47,8 +50,10 @@ uv pip install --python .venv\Scripts\python.exe pyinstaller
 # 产物：dist\semg-desktop\semg-desktop.exe
 ```
 
-录制与通道映射写在 exe 旁的 `records/` 与 `_internal/config/`。构建前先关掉正在运行的
-semg-desktop.exe，否则 COLLECT 清理 dist 时会因 DLL 被占用而报 PermissionError。
+录制与通道映射写在 exe 旁的 `records/` 与 `_internal/config/`；运动员档案（含 MVC 基线）首跑自动
+seeding 到 `_internal/config/athletes.json`。构建前先关掉正在运行的
+semg-desktop.exe，否则 COLLECT 清理 dist 时会因 DLL 被占用而报 PermissionError；
+不想关运行中的实例时用 `--distpath dist-new --workpath build-new` 旁路打包再替换。
 
 ---
 
@@ -118,41 +123,75 @@ host_time   = offset + device_time + i × period / n
 
 ---
 
-## 5. 界面
+## 5. 判读口径（领域层 `semg_desktop/guard/`）
 
-五个页签，数据只有一份，切页不重新采集。
+8 路 sEMG 不是 CH1..CH8，而是双侧四块肌肉：**BF 股二头肌长头 / ST 半腱肌**（腘绳肌，暖色）与
+**VL 股外侧肌 / RF 股直肌**（股四头肌，冷色），左右靠明度成对。IMU 贴大腿，矢状面轴与佩戴侧可在界面改。
 
-- **实时曲线**：8 通道堆叠 / 叠加 / 2×4 网格三种排布，峰值降采样 + 视口裁剪；可选叠加 4 Hz 包络；拖选区可直接喂给分析页；支持冻结画面读数。
-- **IMU**：加速度(g)/角速度(dps)/磁力计(原始) 三张子图 + 姿态方块（陀螺+加速度计 Mahony 互补滤波按样本率解算 roll/pitch/yaw；roll/pitch 由重力持续校正，yaw 仅靠陀螺积分会缓慢漂移，可航向归零）+ 9 分量当前值表。
-- **分析**：每通道样本数、实测速率、峰峰值、RMS、MAV、iEMG、int16 削顶计数；8 通道包络分层图；选中通道的 Welch 功率谱（对账 50 Hz 陷波是否生效很直接）。
-- **状态与链路**：设备表（在线、槽位、MAC、帧数、样本数、实测速率、最后 seq、drop、seq 缺口帧、重同步、缓冲、距今 ms）、链路速率与容量占用、12 项解析计数、判读提示、网关状态行原文。
-- **固件升级 (OTA)**：EMG / IMU 节点应用固件的 BLE 两阶段升级，详见第 9 节。
+| 量 | 算法 | 为什么与拉伤相关 |
+| --- | --- | --- |
+| 激活 %MVC | 包络均值 / 该肌肉 MVC 基线 | 募集不足或代偿一目了然 |
+| 左右不对称 | \|L−R\| / max(L,R) | 伤后侧募集下降是最强的再伤预测因子之一 |
+| H:Q 激活比 | 腘绳肌 / 股四头肌 | 比值低 = 离心保护相对不足 |
+| 共激活 CCI | 2·min(H,Q)/(H+Q) | 关节稳定策略 |
+| 频谱疲劳 | Welch MDF（20–450 Hz）45 s 窗回归 %/min，伴 RMS 漂移 | MDF 下移 + RMS 上升 = 外周疲劳 |
+| 末端摆动负荷 | 触地前 140 ms 窗内腘绳肌激活 × 摆动峰角速度 | 拉伤几乎都发生在末端摆动离心期 |
+| 激活时序 | BF 包络 onset 相对触地的提前量 ms | 预激活越晚，离心保护越差 |
+| 急性负荷比 | 本次课次负荷 AU / 近 7 日慢性均值 | 负荷突增是再伤诱因 |
 
-截图（`scripts/ui_preview.py` 离屏渲染，无显示器也能出图）：
+风险指数 = 六因子严重度加权和（权重公开显示在"分数从哪里来"），严重度经 EMA 平滑、越限需持续
+`sustain_seconds` 才记事件、每因子有冷却，避免抖动刷屏。**步态级时序用 20 Hz 零相位快包络 + 绝对时标窗**：
+显示用的 4 Hz 包络群延迟约 80 ms，直接拿它做末端摆动窗会把离心峰整段错到触地之后。
+
+MDF 估计有三道防假阳性闸门：窗必须装满（≥3.8 s）、前 3 个读数取中位数做 EMA 初值（暖机）、
+回归跨度 ≥15 s 且设 1%/min 死区。短窗 Welch 抖动可达 ±10 Hz，不设闸会读出 ±20%/min 的假疲劳。
+
+## 6. 界面
+
+左侧固定导航 + 顶栏（运动员 / 课目 / 课次计时 / 录制 / 风险 / 静音 / 连接），数据只有一份，切页不重新采集。
+
+- **实时守护**：肌肉激活热力图（后面观腘绳肌 / 前面观股四头肌，填充度 = %MVC，伤史侧虚线环）、
+  步态相位带（支撑 / 摆动 / 末端摆动，超阈值触地标红）、风险仪表 + 因子贡献分解、实时指令横幅；
+  右侧**常驻判读控制区** 14 个实时控件（不对称 / H:Q / 疲劳 / 摆动 / 时序 / 负荷阈值、平滑、计算窗、
+  MVC 归一化、提示音、停练建议、矢状面轴、佩戴侧、疲劳推演倍率）+ 复位 / 随机 / 导出，动一下立刻生效。
+- **肌肉与步态**：8 路波形按"肌肉对 × 左右"排布 + 包络叠加 + 冻结读数；共激活 / BF 占比；逐步离心负荷表。
+- **疲劳与负荷**：腘绳肌 MDF 趋势、激活趋势、逐肌肉频谱表、负荷累积 sparkline、判读文字。
+- **风险事件**：筛选 / 搜索 / 排序、批量确认、删除带撤销、处置备注、明细抽屉、导出 CSV/JSON。
+- **会话报告**：结束课次自动生成结论 + 逐肌肉汇总 + 平均左右对比 + 建议，导出 JSON/CSV/文本，落盘 `session_summary.json`。
+- **运动员档案**：名单 CRUD + 搜索/过滤/排序 + 撤销删除、MVC 基线编辑与**实时标定**、伤史与复出周、慢性负荷。
+- **设备与固件**：传感器布置图 + 贴点清单 + 通道映射；链路与解析（原状态页）；工程调试（原始 sEMG/IMU/频谱）；OTA。
+
+提示音默认开、顶栏一键静音：watch 单声 / warn 双声 / stop 三声，每个音对应一个看得见的界面事件。
+无硬件时默认接**运动员模拟源**（`AthleteSimSource`）：EMG 爆发与步态相位锁定、带通上截止随疲劳下移、
+左右不对称按档案推演，输出仍是网关文本协议，因此解析/时标/录制与真实硬件走同一条路。
+
+截图（`scripts/ui_preview.py` 离屏渲染并驱动完整课次闭环，无显示器也能出图）：
 
 | | |
 | --- | --- |
-| ![实时曲线](docs/screenshots/emg_stacked.png) | ![IMU](docs/screenshots/imu.png) |
-| ![分析](docs/screenshots/analysis.png) | ![状态](docs/screenshots/status.png) |
-| ![固件升级](docs/screenshots/ota.png) | |
+| ![实时守护](docs/preview/01_live.png) | ![肌肉与步态](docs/preview/03_muscle.png) |
+| ![疲劳与负荷](docs/preview/04_fatigue.png) | ![风险事件](docs/preview/05_events.png) |
+| ![会话报告](docs/preview/08_report.png) | ![设备与固件](docs/preview/07_devices.png) |
 
 ---
 
-## 6. 命令行
+## 7. 命令行
 
 ```
-semg-desktop gui [--serial COM7 | --tcp 192.168.4.1:3333 | --replay f.log.gz | --simulate]
+semg-desktop gui [--serial COM7 | --tcp 192.168.4.1:3333 | --replay f.log.gz | --simulate | --athlete]
+                                         # 不给源时默认运动员步态锁定模拟
 semg-desktop selftest [--duration 3]     # 模拟源灌整条链路并自检，返回码可用于 CI
 semg-desktop parse <raw日志>              # 离线体检：每设备帧数/样本/速率/缺口 + 解析异常计数
 semg-desktop export <会话目录>            # npz -> 长表 CSV
 semg-desktop ports                        # 列串口
+python scripts/guard_probe.py --seconds 20 --rate 6 --athlete ath-lin   # 无硬件核对领域量
 ```
 
 `parse` 是给固件调试用的：先原样存下串口文本，再用它判断"到底是链路断了、还是 `cnt` 没到齐、还是字节丢了"。
 
 ---
 
-## 7. 录制与数据格式
+## 8. 录制与数据格式
 
 一次录制是一个会话目录：
 
@@ -169,7 +208,7 @@ records/rec-YYYYmmdd-HHMMSS/
 
 ---
 
-## 8. 配置
+## 9. 配置
 
 `config/default.json`，关键项：
 
@@ -192,7 +231,7 @@ records/rec-YYYYmmdd-HHMMSS/
 
 ---
 
-## 9. 固件升级（EMG / IMU OTA）
+## 10. 固件升级（EMG / IMU OTA）
 
 四块板共用一套双固件设计（见 [`sEMG-OTA-ESP32-V1.0`](../sEMG-OTA-ESP32-V1.0/README.md)）：`factory` 常驻一个与业务无关的 BLE 接收固件，`ota_0`/`ota_1` 放业务固件，A/B 交替写、旧槽留给 bootloader 回滚。本工具负责把新的应用固件灌进去，与工厂脚本 `tools/ble_ota_send.py` 同协议，只是带进度、可取消、能把 8 路 EMG 排着队一起升。
 
@@ -242,18 +281,21 @@ records/rec-YYYYmmdd-HHMMSS/
 
 ---
 
-## 10. 测试与验证
+## 11. 测试与验证
 
 ```sh
-.venv/bin/python -m pytest -q          # 123 个用例
+.venv/bin/python -m pytest -q          # 165 个用例
 .venv/bin/python -m semg_desktop selftest
+python scripts/ui_preview.py           # 离屏驱动完整课次闭环并逐页出图
 ```
 
-覆盖：协议行级/字节级解析与失步恢复、ANSI/日志前缀、IMU 多行配对与截断、seq 回绕与缺口、PLL 抗抖动、全速灌文件不压缩时标、环形缓冲回绕、包络/RMS/iEMG/PSD 数值正确性、录制→回放→再解析的字节级闭环、TCP 源对真实 socket 的流式接收、OTA 分包与 ACK/CRC 与地址匹配与编排（不碰蓝牙硬件）、五个视图的离屏渲染冒烟。
+覆盖：协议行级/字节级解析与失步恢复、ANSI/日志前缀、IMU 多行配对与截断、seq 回绕与缺口、PLL 抗抖动、全速灌文件不压缩时标、环形缓冲回绕、包络/RMS/iEMG/PSD 数值正确性、录制→回放→再解析的字节级闭环、TCP 源对真实 socket 的流式接收、OTA 分包与 ACK/CRC 与地址匹配与编排（不碰蓝牙硬件）；
+领域层：解剖映射、MDF 随带通下移、步态峰/冲击检测与间隔、小批量 IMU 不崩、激活/不对称/末端摆动/时序数值合理性、疲劳随课次升级风险、MDF 暖机不造假斜率、MVC 标定、课次汇总、档案 CRUD/搜索/排序/撤销、事件确认/备注/删除/撤销；
+界面：七页离屏渲染、课次闭环生成报告、阈值滑杆实时生效、切运动员重建模拟生理、缩放与重复课次/切换的线程与状态稳定性、事件批量处置与批量撤销。
 
 ---
 
-## 11. 已知限制
+## 12. 已知限制
 
 - **文本协议无校验**：字节丢失可能产生"合法但错误"的样本，只能靠统计量发现，不能纠正。要根治得在网关侧加长度+CRC 或改二进制输出（网关 README 也把这条列为后续方向）。
 - **协议无时间戳**：时标是重建的，跨通道对齐误差量级等于一次 read 的攒包时间（约几毫秒到几十毫秒），做通道间相位分析时要把这点考虑进去。

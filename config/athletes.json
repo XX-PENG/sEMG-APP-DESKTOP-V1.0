@@ -1,0 +1,169 @@
+{
+  "athletes": [
+    {
+      "id": "ath-lin",
+      "name": "林致远",
+      "number": 9,
+      "position": "前锋",
+      "age": 24,
+      "height_cm": 178,
+      "mass_kg": 72.5,
+      "dominant_leg": "R",
+      "mvc": {
+        "bf_l": 2652.0,
+        "st_l": 2652.0,
+        "vl_l": 3162.0,
+        "rf_l": 3162.0,
+        "bf_r": 2574.0,
+        "st_r": 2574.0,
+        "vl_r": 3100.0,
+        "rf_r": 3100.0
+      },
+      "chronic_load": 412.0,
+      "injuries": [
+        {
+          "date": "2026-03-14",
+          "muscle": "股二头肌长头",
+          "side": "R",
+          "grade": "II 级",
+          "weeks_out": 6,
+          "note": "冲刺末端摆动拉伤，MRI 示肌腱交界处水肿"
+        }
+      ],
+      "return_week": 6,
+      "thresholds": {
+        "asym_warn": 8.0,
+        "asym_danger": 16.0,
+        "swing_danger": 880.0
+      },
+      "note": "伤后复出第 6 周，右侧离心力量仍低于左侧，冲刺课目需限制在 80% 强度。",
+      "created": 1795001878.554757
+    },
+    {
+      "id": "ath-zhao",
+      "name": "赵梦琪",
+      "number": 7,
+      "position": "中场",
+      "age": 22,
+      "height_cm": 169,
+      "mass_kg": 61.0,
+      "dominant_leg": "L",
+      "mvc": {
+        "bf_l": 2444.0,
+        "st_l": 2444.0,
+        "vl_l": 2914.0,
+        "rf_l": 2914.0,
+        "bf_r": 2652.0,
+        "st_r": 2652.0,
+        "vl_r": 3162.0,
+        "rf_r": 3162.0
+      },
+      "chronic_load": 386.0,
+      "injuries": [
+        {
+          "date": "2025-11-02",
+          "muscle": "半腱肌",
+          "side": "L",
+          "grade": "I 级",
+          "weeks_out": 3,
+          "note": "变向切入时牵拉伤"
+        }
+      ],
+      "return_week": 42,
+      "thresholds": {},
+      "note": "跑动量全队最高，重点关注疲劳累积与急性负荷比。",
+      "created": 1795001878.554765
+    },
+    {
+      "id": "ath-chen",
+      "name": "陈昊",
+      "number": 4,
+      "position": "后卫",
+      "age": 27,
+      "height_cm": 183,
+      "mass_kg": 79.0,
+      "dominant_leg": "R",
+      "mvc": {
+        "bf_l": 2912.0,
+        "st_l": 2912.0,
+        "vl_l": 3472.0,
+        "rf_l": 3472.0,
+        "bf_r": 2860.0,
+        "st_r": 2860.0,
+        "vl_r": 3410.0,
+        "rf_r": 3410.0
+      },
+      "chronic_load": 298.0,
+      "injuries": [],
+      "return_week": null,
+      "thresholds": {},
+      "note": "力量基础好，H:Q 稳定，作为队内基线参照。",
+      "created": 1795001878.5547702
+    },
+    {
+      "id": "ath-su",
+      "name": "苏雨桐",
+      "number": 11,
+      "position": "前锋",
+      "age": 20,
+      "height_cm": 172,
+      "mass_kg": 64.5,
+      "dominant_leg": "L",
+      "mvc": {
+        "bf_l": 2288.0,
+        "st_l": 2288.0,
+        "vl_l": 2728.0,
+        "rf_l": 2728.0,
+        "bf_r": 2421.1,
+        "st_r": 2421.1,
+        "vl_r": 2976.0,
+        "rf_r": 2976.0
+      },
+      "chronic_load": 255.0,
+      "injuries": [
+        {
+          "date": "2026-07-21",
+          "muscle": "股二头肌长头",
+          "side": "L",
+          "grade": "I 级",
+          "weeks_out": 2,
+          "note": "季前冲刺营"
+        }
+      ],
+      "return_week": 3,
+      "thresholds": {
+        "lead_warn": 190.0,
+        "lead_danger": 130.0
+      },
+      "note": "复出第 3 周，激活时序偏晚，先做唤醒再上强度。",
+      "created": 1795001878.554775
+    },
+    {
+      "id": "ath-guo",
+      "name": "郭子航",
+      "number": 1,
+      "position": "守门员",
+      "age": 29,
+      "height_cm": 186,
+      "mass_kg": 84.0,
+      "dominant_leg": "R",
+      "mvc": {
+        "bf_l": 2652.0,
+        "st_l": 2652.0,
+        "vl_l": 3162.0,
+        "rf_l": 3162.0,
+        "bf_r": 2730.0,
+        "st_r": 2730.0,
+        "vl_r": 3255.0,
+        "rf_r": 3255.0
+      },
+      "chronic_load": 186.0,
+      "injuries": [],
+      "return_week": null,
+      "thresholds": {},
+      "note": "扑救以侧向蹬伸为主，冲刺负荷低，重点看左右不对称。",
+      "created": 1795001878.5547795
+    }
+  ],
+  "saved": 1795006055.387294
+}
