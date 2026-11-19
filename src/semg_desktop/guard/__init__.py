@@ -6,8 +6,11 @@ from .model import (
     Drill,
     Muscle,
     Thresholds,
+    channel_of,
+    muscle_assignment,
     muscle_by_channel,
     muscle_by_id,
+    set_muscle_assignment,
 )
 from .roster import AthleteProfile, Roster
 
@@ -19,6 +22,9 @@ __all__ = [
     "Muscle",
     "Roster",
     "Thresholds",
+    "channel_of",
+    "muscle_assignment",
     "muscle_by_channel",
     "muscle_by_id",
+    "set_muscle_assignment",
 ]

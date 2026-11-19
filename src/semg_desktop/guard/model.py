@@ -2,6 +2,7 @@
 
 通道号到肌肉的对应关系是这套系统的语义地基：8 路 sEMG 不是 "CH1..CH8"，而是双侧
 腘绳肌（股二头肌 BF / 半腱肌 ST）与双侧股四头肌（股外侧肌 VL / 股直肌 RF）。
+对应关系可在传感器布局页拖拽交换（_ASSIGNMENT），判读始终取当前映射。
 腘绳肌用暖色、股四头肌用冷色，左侧满彩、右侧提亮——同一块肌肉的左右两侧靠色族与
 明度成对，而不是靠八个互不相干的色相，这样"左右不对称"在图上一眼能看出来。
 """
@@ -24,40 +25,72 @@ class Muscle:
 
     @property
     def label(self) -> str:
-        return f"{self.abbr}{'左' if self.side == 'L' else '右'}"
+        return f"{'左' if self.side == 'L' else '右'}·{self.abbr}"
 
     @property
     def full_label(self) -> str:
-        return f"{self.name}·{'左' if self.side == 'L' else '右'}"
+        return f"{'左' if self.side == 'L' else '右'}·{self.name}"
 
 
+# 按通道号排序；出厂贴点默认 CH1/CH5=半腱肌、CH2/CH6=股二头肌（与硬件接线一致），
+# 布局页拖拽交换改写 _ASSIGNMENT，判读始终取当前映射。
 MUSCLES: tuple[Muscle, ...] = (
-    Muscle("bf_l", 0, "股二头肌长头", "BF", "L", "ham", "#FF4D8D",
-           "末端摆动离心制动主力，拉伤最常发生的位置"),
-    Muscle("st_l", 1, "半腱肌", "ST", "L", "ham", "#FF8A3D",
+    Muscle("st_l", 0, "半腱肌", "ST", "L", "ham", "#FF8A3D",
            "内侧腘绳肌，与 BF 分担离心负荷"),
+    Muscle("bf_l", 1, "股二头肌长头", "BF", "L", "ham", "#FF4D8D",
+           "末端摆动离心制动主力，拉伤最常发生的位置"),
     Muscle("vl_l", 2, "股外侧肌", "VL", "L", "quad", "#3D9BFF",
            "伸膝主力，H:Q 比的分母"),
     Muscle("rf_l", 3, "股直肌", "RF", "L", "quad", "#12E0C4",
            "跨髋膝双关节，摆动末期减速"),
-    Muscle("bf_r", 4, "股二头肌长头", "BF", "R", "ham", "#FFA8C8",
-           "末端摆动离心制动主力，拉伤最常发生的位置"),
-    Muscle("st_r", 5, "半腱肌", "ST", "R", "ham", "#FFC48A",
+    Muscle("st_r", 4, "半腱肌", "ST", "R", "ham", "#FFC48A",
            "内侧腘绳肌，与 BF 分担离心负荷"),
+    Muscle("bf_r", 5, "股二头肌长头", "BF", "R", "ham", "#FFA8C8",
+           "末端摆动离心制动主力，拉伤最常发生的位置"),
     Muscle("vl_r", 6, "股外侧肌", "VL", "R", "quad", "#9CC9FF",
            "伸膝主力，H:Q 比的分母"),
     Muscle("rf_r", 7, "股直肌", "RF", "R", "quad", "#7FF0E2",
            "跨髋膝双关节，摆动末期减速"),
 )
 
-_BY_CHANNEL = {m.channel: m for m in MUSCLES}
 _BY_ID = {m.id: m for m in MUSCLES}
 HAM_IDS = tuple(m.id for m in MUSCLES if m.group == "ham")
 QUAD_IDS = tuple(m.id for m in MUSCLES if m.group == "quad")
 
+# 贴点 → 采集通道的当前对应：MUSCLES.channel 只是出厂默认，布局页拖拽交换贴点后
+# 在这里改写，引擎 / 波形 / 清单全部经 channel_of / muscle_by_channel 取当前映射，
+# 保证"数据跟着贴点走"。
+_ASSIGNMENT: dict[str, int] = {m.id: m.channel for m in MUSCLES}
+
+
+def muscle_assignment() -> dict[str, int]:
+    return dict(_ASSIGNMENT)
+
+
+def set_muscle_assignment(mapping: dict) -> None:
+    """空映射 = 恢复出厂对应；否则只接受 8 贴点 × 8 通道的一一对应，非法输入整体忽略。"""
+    if not mapping:
+        _ASSIGNMENT.clear()
+        _ASSIGNMENT.update({m.id: m.channel for m in MUSCLES})
+        return
+    clean: dict[str, int] = {}
+    for mid, ch in (mapping or {}).items():
+        if mid in _BY_ID and isinstance(ch, int) and 0 <= ch < len(MUSCLES):
+            clean[mid] = ch
+    if len(clean) == len(MUSCLES) and sorted(clean.values()) == list(range(len(MUSCLES))):
+        _ASSIGNMENT.clear()
+        _ASSIGNMENT.update(clean)
+
+
+def channel_of(mid: str) -> int:
+    return _ASSIGNMENT.get(mid, _BY_ID[mid].channel)
+
 
 def muscle_by_channel(channel: int) -> Muscle | None:
-    return _BY_CHANNEL.get(int(channel))
+    for mid, ch in _ASSIGNMENT.items():
+        if ch == int(channel):
+            return _BY_ID[mid]
+    return None
 
 
 def muscle_by_id(mid: str) -> Muscle | None:

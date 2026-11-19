@@ -29,9 +29,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import Config, load_config, save_channel_map
+from ..config import Config, load_config, save_channel_map, save_muscle_map
 from ..guard.engine import GuardEngine, cue_for
-from ..guard.model import DRILLS, DRILL_BY_ID, Thresholds
+from ..guard.model import DRILLS, DRILL_BY_ID, Thresholds, muscle_assignment, set_muscle_assignment
 from ..guard.roster import Roster
 from ..guard.session import build_summary
 from ..pipeline import Acquisition, ChannelMap
@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.cfg: Config = load_config(config_path)
         self.config_path = config_path
+        set_muscle_assignment(self.cfg.muscle_map)
         self.roster = Roster(self._roster_path())
         self.profile = self.roster.athletes[0] if self.roster.athletes else None
         self.th = self.profile.thresholds_for(Thresholds()) if self.profile else Thresholds()
@@ -147,6 +148,8 @@ class MainWindow(QMainWindow):
         self.roster_view.roster_changed.connect(self._roster_changed)
         self.roster_view.calibrate_requested.connect(self.calibrate_mvc)
         self.live.panel.changed.connect(self._thresholds_changed)
+        self.devices.sensor_map.assignment_changed.connect(self._save_muscle_map)
+        self.devices.sensor_map.worn_side_changed.connect(self._imu_side_changed)
         self.emg.region_selected.connect(self.analysis.set_selection)
 
         self.lbl_status = QLabel("未连接")
@@ -344,6 +347,18 @@ class MainWindow(QMainWindow):
         self._sync_mute_button()
         if self.acq and isinstance(self.acq.source, AthleteSimSource):
             self.acq.source.fatigue_rate = self.th.fatigue_rate
+
+    def _imu_side_changed(self, side: str) -> None:
+        self.live.panel.sync()
+        self._thresholds_changed()
+        self.lbl_status.setText(f"IMU 佩戴侧已切换：{'左' if side == 'L' else '右'}大腿")
+
+    def _save_muscle_map(self) -> None:
+        self.cfg.muscle_map = muscle_assignment()
+        if self.config_path:
+            save_muscle_map(self.config_path, self.cfg.muscle_map)
+        self.emg.refresh_channels()
+        self.analysis.refresh_channels()
 
     def _toggle_mute(self) -> None:
         muted = self.btn_mute.isChecked()
@@ -580,6 +595,8 @@ class MainWindow(QMainWindow):
         elif current is self.devices:
             self.devices.update_data(st, self.acq.device_rows(), self.acq.status_log(), snap)
             inner = self.devices.inner.currentWidget()
+            if inner is self.devices.debug:      # 工程调试是嵌套子标签，解包到具体视图
+                inner = inner.currentWidget()
             if inner is self.emg:
                 self.emg.update_data(self.acq.emg_windows(self.emg.span),
                                      self.acq.env_windows(self.emg.span), t_now)

@@ -31,7 +31,8 @@ def test_muscle_mapping_covers_eight_channels_bilaterally():
     for side in ("L", "R"):
         for abbr in ("bf", "st", "vl", "rf"):
             assert muscle_by_id(f"{abbr}_{side.lower()}") is not None
-    assert muscle_by_channel(0).id == "bf_l"
+    assert muscle_by_channel(0).id == "st_l"
+    assert muscle_by_channel(1).id == "bf_l"
     assert muscle_by_channel(7).id == "rf_r"
     assert len(HAM_IDS) == 4
 

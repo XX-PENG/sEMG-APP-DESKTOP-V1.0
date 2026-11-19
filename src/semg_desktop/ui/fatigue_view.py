@@ -84,10 +84,10 @@ class FatigueView(QWidget):
             self.p_act.getAxis(ax).setPen(pg.mkPen(T.C["border"]))
             self.p_act.getAxis(ax).setTextPen(pg.mkPen(T.C["dim"]))
         self._act_curves = {
-            "ham_l": self.p_act.plot(pen=pg.mkPen(T.C["magenta"], width=1.6), name="腘绳肌 左"),
-            "ham_r": self.p_act.plot(pen=pg.mkPen("#FFA8C8", width=1.6), name="腘绳肌 右"),
-            "quad_l": self.p_act.plot(pen=pg.mkPen(T.C["blue"], width=1.4), name="股四头肌 左"),
-            "quad_r": self.p_act.plot(pen=pg.mkPen("#9CC9FF", width=1.4), name="股四头肌 右"),
+            "ham_l": self.p_act.plot(pen=pg.mkPen(T.C["magenta"], width=1.6), name="左·腘绳肌"),
+            "ham_r": self.p_act.plot(pen=pg.mkPen("#FFA8C8", width=1.6), name="右·腘绳肌"),
+            "quad_l": self.p_act.plot(pen=pg.mkPen(T.C["blue"], width=1.4), name="左·股四头肌"),
+            "quad_r": self.p_act.plot(pen=pg.mkPen("#9CC9FF", width=1.4), name="右·股四头肌"),
         }
         l_act.addWidget(self.gfx_act, 1)
         lv.addWidget(f_act, 2)

@@ -85,6 +85,8 @@ class Config:
         default_factory=lambda: {"serial": 200_000, "tcp": 11_520}
     )
     channel_map: dict[str, int] = field(default_factory=dict)
+    # 肌肉贴点 → 采集通道：布局页俯视图拖拽交换后写回，判读数据跟着贴点走
+    muscle_map: dict[str, int] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -117,6 +119,7 @@ def load_config(path: str | Path | None = None) -> Config:
             "tcp": int(link.get("tcp_capacity_bytes_per_second", 11_520)),
         },
         channel_map=dict(raw.get("channel_map", {})),
+        muscle_map={k: int(v) for k, v in raw.get("muscle_map", {}).items()},
         raw=raw,
     )
     if len(cfg.semg.colors) < cfg.semg.channel_count:
@@ -131,4 +134,14 @@ def save_channel_map(path: str | Path, channel_map: dict[str, int]) -> None:
     if path.is_file():
         data = json.loads(path.read_text(encoding="utf-8"))
     data["channel_map"] = dict(channel_map)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def save_muscle_map(path: str | Path, muscle_map: dict[str, int]) -> None:
+    """把肌肉贴点 → 通道映射合并写回配置文件，跨次运行保持贴点交换结果。"""
+    path = Path(path)
+    data = {}
+    if path.is_file():
+        data = json.loads(path.read_text(encoding="utf-8"))
+    data["muscle_map"] = dict(muscle_map)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

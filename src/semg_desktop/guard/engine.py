@@ -30,6 +30,7 @@ from .model import (
     RiskEvent,
     Stride,
     Thresholds,
+    channel_of,
     muscle_by_id,
 )
 from .roster import AthleteProfile
@@ -315,8 +316,9 @@ class GuardEngine:
             self._last_psd_t = t_now
 
         for m in MUSCLES:
-            reading = MuscleReading(id=m.id, online=bool(online.get(m.channel, False)))
-            te, ev = envs.get(m.channel, (np.empty(0), np.empty(0)))
+            ch = channel_of(m.id)
+            reading = MuscleReading(id=m.id, online=bool(online.get(ch, False)))
+            te, ev = envs.get(ch, (np.empty(0), np.empty(0)))
             if ev.size:
                 reading.samples = int(ev.size)
                 reading.env_peak = float(np.max(ev))
@@ -330,11 +332,11 @@ class GuardEngine:
                 reading.activation = prev + (raw_act - prev) * alpha
                 self._act_ema[m.id] = reading.activation
             if do_psd:
-                tr, rv = raws.get(m.channel, (np.empty(0), np.empty(0)))
+                tr, rv = raws.get(ch, (np.empty(0), np.empty(0)))
                 # 窗必须装满，且窗内实测速率要与设备时钟速率一致：PLL 暖机/追赶期间
                 # 时标会被压缩或拉伸，窗内 (n-1)/span 能算出 1000~3000 Hz 的假速率，
                 # 据此做 Welch 会把 MDF 算错一倍并污染疲劳回归。
-                expected = rates.get(m.channel, 0.0)
+                expected = rates.get(ch, 0.0)
                 usable = rv.size > 64 and float(tr[-1] - tr[0]) >= 3.8 and expected > 0
                 if usable:
                     win_fs = (rv.size - 1) / max(float(tr[-1] - tr[0]), _EPS)
@@ -452,7 +454,7 @@ class GuardEngine:
             m = muscle_by_id(mid)
             if m is None:
                 continue
-            t, x = acq.emg_abs(m.channel, strike_t - 0.40, strike_t + 0.06)
+            t, x = acq.emg_abs(channel_of(mid), strike_t - 0.40, strike_t + 0.06)
             if x.size < 64 or t.size != x.size:
                 out[mid] = (np.empty(0), np.empty(0))
                 continue
@@ -651,7 +653,7 @@ class GuardEngine:
         envs = acq.env_windows(seconds)
         out: dict[str, float] = {}
         for m in MUSCLES:
-            _t, ev = envs.get(m.channel, (np.empty(0), np.empty(0)))
+            _t, ev = envs.get(channel_of(m.id), (np.empty(0), np.empty(0)))
             if ev.size >= 8:
                 out[m.id] = round(float(np.percentile(ev, 97)), 1)
         return out

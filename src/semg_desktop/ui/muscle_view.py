@@ -1,6 +1,6 @@
 """肌肉与步态页：8 路 sEMG 按解剖学排布 + 逐步离心负荷表。
 
-波形不再叫 CH1..CH8：行是肌肉对（BF/ST/VL/RF），列是左右腿，同一块肌肉的两侧上下相邻，
+波形不再叫 CH1..CH8：行是肌肉对（ST/BF/VL/RF，按通道序），列是左右腿，同一块肌肉的两侧上下相邻，
 不对称在波形幅度上直接可见。右侧逐步表把每一步的末端摆动负荷摊开，供回放复核。
 """
 
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..guard.model import MUSCLES, GuardSnapshot, Thresholds
+from ..guard.model import MUSCLES, GuardSnapshot, Thresholds, channel_of
 from . import theme as T
 from .widgets import StatTile, card
 
@@ -134,7 +134,7 @@ class MuscleView(QWidget):
         self._curves, self._env, self._plots = {}, {}, {}
         grid = self.cb_layout.currentIndex() == 0
         show_env = self.chk_env.isChecked()
-        pairs = [("bf", 0), ("st", 1), ("vl", 2), ("rf", 3)]
+        pairs = [("st", 0), ("bf", 1), ("vl", 2), ("rf", 3)]
         for abbr, row in pairs:
             for side, col in (("L", 0), ("R", 1)):
                 mid = f"{abbr}_{side.lower()}"
@@ -166,7 +166,7 @@ class MuscleView(QWidget):
     def update_data(self, windows: dict, envs: dict, t_now: float) -> None:
         if self.frozen:
             return
-        by_channel = {m.channel: m.id for m in MUSCLES}
+        by_channel = {channel_of(m.id): m.id for m in MUSCLES}
         active = 0
         for ch, (t, v) in windows.items():
             mid = by_channel.get(ch)

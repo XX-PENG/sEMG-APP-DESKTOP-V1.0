@@ -139,9 +139,16 @@ def test_main_window_receives_simulated_stream(qapp):
         win.refresh()
         qapp.processEvents()
     for inner in (win.emg, win.imu, win.analysis, win.status, win.ota):
-        win.devices.inner.setCurrentWidget(inner)
+        if inner in (win.emg, win.imu, win.analysis):
+            win.devices.inner.setCurrentWidget(win.devices.debug)
+            win.devices.debug.setCurrentWidget(inner)
+        else:
+            win.devices.inner.setCurrentWidget(inner)
         win.refresh()
         qapp.processEvents()
+    # 回归：嵌套工程子标签必须真正拿到实时数据（旧路由只认直接子页，原始 sEMG 会空白）
+    assert any(c.xData is not None and len(c.xData) > 0 for c in win.emg._curves)
+    assert win.analysis.tbl.item(0, 1).text() != "—"
     win.close()
     assert win.acq is None
 
@@ -245,6 +252,90 @@ def test_resize_and_repeated_interaction_stable(qapp):
     assert win.acq.stats().error is None
     assert threading.active_count() <= base_threads + 2
     assert win._snap.data_ok
+    win.disconnect_source()
+    win.close()
+
+
+def test_sensor_map_swap_and_imu_side(qapp, tmp_path):
+    """布局页闭环：俯视图拖拽交换贴点并改写数据映射落盘；后面观不可拖；IMU 拖拽换腿。"""
+    import json
+
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    from semg_desktop.guard.model import channel_of, muscle_by_channel, muscle_by_id
+    from semg_desktop.ui.devices_view import _posterior_xy
+
+    cfg_file = tmp_path / "c.json"
+    cfg_file.write_text("{}", encoding="utf-8")
+    win = MainWindow(config_path=str(cfg_file), source=SimulateSource(frame_period=0.01))
+    _KEEP.append(win)
+    _pump(qapp, win, 0.6)
+    win._select_nav("devices")
+    win.refresh()
+    qapp.processEvents()
+    sm = win.devices.sensor_map
+
+    def mouse(kind, pos):
+        ev = QMouseEvent(kind, QPointF(pos), QPointF(pos),
+                         Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+        {QEvent.MouseButtonPress: sm.mousePressEvent,
+         QEvent.MouseMove: sm.mouseMoveEvent,
+         QEvent.MouseButtonRelease: sm.mouseReleaseEvent}[kind](ev)
+
+    def drag_to(p0, p1):
+        mouse(QEvent.MouseButtonPress, p0)
+        mouse(QEvent.MouseMove, p1)
+        mouse(QEvent.MouseButtonRelease, p1)
+
+    # 名称格式：左·XX；出厂默认 CH1/CH5=半腱肌、CH2/CH6=股二头肌
+    assert muscle_by_id("bf_l").full_label == "左·股二头肌长头"
+    assert muscle_by_id("st_r").label == "右·ST"
+    assert channel_of("bf_l") == 1 and channel_of("st_l") == 0
+    # 俯视图 bf_l 拖到 st_l 槽位：交换映射并落盘，清单/表格/引擎随动
+    drag_to(sm._slot_pos("bf_l", sm._layout()), sm._slot_pos("st_l", sm._layout()))
+    assert channel_of("bf_l") == 0 and channel_of("st_l") == 1
+    assert muscle_by_channel(0).id == "bf_l"
+    saved = json.loads(cfg_file.read_text(encoding="utf-8"))
+    assert saved["muscle_map"]["bf_l"] == 0 and saved["muscle_map"]["st_l"] == 1
+    win.refresh()
+    qapp.processEvents()
+    assert "CH1" in win.devices.place_labels["bf_l"].text()
+    assert "股二头肌" in win.devices.tbl.item(0, 1).text()   # CH1 行现在是股二头肌
+    snap = win.engine.update(win.acq, win.acq.now())
+    assert len(snap.muscles) == 8 and snap.muscles["bf_l"].online
+
+    # 后面观贴点不可拖动：按下不产生拖拽，映射不变
+    lay = sm._layout()
+    x, y = _posterior_xy("vl", "R")
+    p0 = QPointF(lay["cx1"]["R"] + x * lay["s1"], lay["top1"] + y * lay["s1"])
+    mouse(QEvent.MouseButtonPress, p0)
+    assert sm._drag is None
+    mouse(QEvent.MouseButtonRelease, p0)
+    assert channel_of("vl_r") == 6
+
+    # 拖到空白处：不交换，吸附还原
+    p0 = sm._slot_pos("vl_l", sm._layout())
+    drag_to(p0, QPointF(p0.x(), p0.y() - 60))
+    assert channel_of("vl_l") == 2
+
+    # IMU 从右腿俯视图拖到左腿面板：换侧 + 实时页下拉与引擎同步
+    assert win.th.worn_side == "R"
+    drag_to(sm._imu_pos("R", sm._layout()), sm._imu_pos("L", sm._layout()))
+    assert win.th.worn_side == "L"
+    assert win.engine.th.worn_side == "L"
+    assert win.live.panel.cb_side.currentIndex() == 0
+
+    # 复位映射按钮恢复出厂对应
+    win.devices.btn_reset_place.click()
+    assert channel_of("bf_l") == 1 and channel_of("st_l") == 0
+    saved = json.loads(cfg_file.read_text(encoding="utf-8"))
+    assert saved["muscle_map"]["bf_l"] == 1
+
+    # 缩小窗口后命中与绘制仍一致
+    win.resize(1100, 700)
+    _pump(qapp, win, 0.3)
+    assert not sm.grab().isNull()
     win.disconnect_source()
     win.close()
 

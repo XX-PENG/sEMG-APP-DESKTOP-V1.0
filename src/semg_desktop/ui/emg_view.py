@@ -10,6 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
+
+from ..guard.model import muscle_by_channel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -136,6 +138,18 @@ class EmgView(QWidget):
     def mode(self) -> str:
         return self.cb_mode.currentText()
 
+    def _ch_color(self, i: int) -> str:
+        m = muscle_by_channel(i)
+        return m.color if m else self.cfg.semg.colors[i % len(self.cfg.semg.colors)]
+
+    def _ch_name(self, i: int) -> str:
+        m = muscle_by_channel(i)
+        return f"CH{i + 1} · {m.label}" if m else f"CH{i + 1}"
+
+    def refresh_channels(self) -> None:
+        """贴点映射交换后，按当前肌肉身份重刷颜色与通道名。"""
+        self._rebuild()
+
     # ── 布局 ────────────────────────────────────────────────────────────────
 
     def _rebuild(self, *_a) -> None:
@@ -149,10 +163,11 @@ class EmgView(QWidget):
             for i in range(self.n):
                 p = self.gfx.addPlot(row=i % 4, col=i // 4)
                 self._style(p, ylabel="ADC 定点值")
+                p.setTitle(self._ch_name(i), color=self._ch_color(i), size="11px")
                 if self._plots:
                     p.setXLink(self._plots[0])
                 self._plots.append(p)
-                self._curves.append(self._add_curve(p, i, name=f"CH{i + 1}"))
+                self._curves.append(self._add_curve(p, i, name=self._ch_name(i)))
                 if show_env:
                     self._env_curves.append(self._add_curve(p, i, env=True))
             return
@@ -162,7 +177,7 @@ class EmgView(QWidget):
         p.addLegend(offset=(-8, 8), labelTextColor="w")
         self._plots = [p]
         for i in range(self.n):
-            self._curves.append(self._add_curve(p, i, name=f"CH{i + 1}"))
+            self._curves.append(self._add_curve(p, i, name=self._ch_name(i)))
         if show_env:
             self._env_curves = [self._add_curve(p, i, env=True) for i in range(self.n)]
         if self.chk_region.isChecked():
@@ -176,7 +191,7 @@ class EmgView(QWidget):
         p.disableAutoRange()
 
     def _add_curve(self, plot: pg.PlotItem, index: int, name: str | None = None, env: bool = False):
-        color = self.cfg.semg.colors[index % len(self.cfg.semg.colors)]
+        color = self._ch_color(index)
         pen = pg.mkPen(color, width=1, style=Qt.DashLine if env else Qt.SolidLine)
         curve = plot.plot(
             pen=pen,

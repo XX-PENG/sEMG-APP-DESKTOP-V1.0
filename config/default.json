@@ -27,14 +27,14 @@
     "baseline_offset": 4000.0,
     "auto_range": true,
     "colors": [
-      "#e6194b",
-      "#3cb44b",
-      "#4363d8",
-      "#f58231",
-      "#911eb4",
-      "#46f0f0",
-      "#f032e6",
-      "#bcf60c"
+      "#FF8A3D",
+      "#FF4D8D",
+      "#3D9BFF",
+      "#12E0C4",
+      "#FFC48A",
+      "#FFA8C8",
+      "#9CC9FF",
+      "#7FF0E2"
     ]
   },
   "imu": {

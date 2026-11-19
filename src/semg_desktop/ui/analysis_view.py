@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..analytics import psd_db
+from ..guard.model import muscle_by_channel
 
 COLUMNS = ["通道", "样本", "实测速率", "峰峰值", "RMS", "MAV", "iEMG", "int16削顶"]
 
@@ -43,14 +45,17 @@ class AnalysisView(QWidget):
         self.tbl = QTableWidget(self.n, len(COLUMNS))
         self.tbl.setHorizontalHeaderLabels(COLUMNS)
         self.tbl.verticalHeader().setVisible(False)
-        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tbl.horizontalHeader().setStretchLastSection(False)
+        self.tbl.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
 
         self.env_plot = pg.PlotWidget()
         self.env_plot.setLabel("bottom", "相对时间", units="s")
         self.env_plot.setLabel("left", "包络（整流 + 4 Hz 低通）")
         self.env_plot.showGrid(x=True, y=True, alpha=0.25)
+        self.env_plot.addLegend(offset=(-8, 8), labelTextColor="w")
         self.env_curves = [
-            self.env_plot.plot(pen=pg.mkPen(cfg.semg.colors[i % len(cfg.semg.colors)], width=1))
+            self.env_plot.plot(pen=pg.mkPen(self._ch_color(i), width=1), name=self._ch_name(i))
             for i in range(self.n)
         ]
 
@@ -68,7 +73,7 @@ class AnalysisView(QWidget):
         self.cb_span.valueChanged.connect(self._set_span)
 
         self.cb_channel = QComboBox()
-        self.cb_channel.addItems([f"CH{i + 1}" for i in range(self.n)])
+        self.cb_channel.addItems([self._ch_name(i) for i in range(self.n)])
 
         self.chk_selection = QCheckBox("沿用波形选区")
         self.chk_selection.toggled.connect(self._toggle_selection)
@@ -89,6 +94,7 @@ class AnalysisView(QWidget):
         left.addWidget(box)
         left_widget = QWidget()
         left_widget.setLayout(left)
+        left_widget.setMinimumWidth(380)
 
         stack = QSplitter(Qt.Vertical)
         stack.addWidget(self.env_plot)
@@ -96,6 +102,7 @@ class AnalysisView(QWidget):
         split = QSplitter(Qt.Horizontal)
         split.addWidget(left_widget)
         split.addWidget(stack)
+        split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
 
         root = QHBoxLayout(self)
@@ -125,6 +132,25 @@ class AnalysisView(QWidget):
             return max(0.02, hi - lo), max(0.0, -hi)
         return self.span, 0.0
 
+    def _ch_color(self, i: int) -> str:
+        m = muscle_by_channel(i)
+        return m.color if m else self.cfg.semg.colors[i % len(self.cfg.semg.colors)]
+
+    def _ch_name(self, i: int) -> str:
+        m = muscle_by_channel(i)
+        return f"CH{i + 1} · {m.label}" if m else f"CH{i + 1}"
+
+    def refresh_channels(self) -> None:
+        """贴点映射交换后，按当前肌肉身份重刷包络颜色/图例与谱通道名。"""
+        for c in self.env_curves:
+            self.env_plot.removeItem(c)
+        self.env_curves = [
+            self.env_plot.plot(pen=pg.mkPen(self._ch_color(i), width=1), name=self._ch_name(i))
+            for i in range(self.n)
+        ]
+        for i in range(self.n):
+            self.cb_channel.setItemText(i, self._ch_name(i))
+
     # ── 刷新 ────────────────────────────────────────────────────────────────
 
     def update_data(self, t_now: float) -> None:
@@ -136,11 +162,12 @@ class AnalysisView(QWidget):
 
         for i in range(self.n):
             m = metrics.get(i)
+            ch_name = self._ch_name(i)
             if m is None or not getattr(m, "count", 0):
-                cells = [f"CH{i + 1}"] + ["—"] * 7
+                cells = [ch_name] + ["—"] * 7
             else:
                 cells = [
-                    f"CH{i + 1}",
+                    ch_name,
                     f"{m.count:,}",
                     f"{m.rate:,.0f}/s",
                     f"{m.p2p:,.0f}",
@@ -152,6 +179,9 @@ class AnalysisView(QWidget):
             for c, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if c == 0:
+                    item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                    item.setForeground(QColor(self._ch_color(i)))
                 self.tbl.setItem(i, c, item)
 
         top = max((float(np.max(ee)) for _t, ee in envs.values() if ee.size), default=1.0)

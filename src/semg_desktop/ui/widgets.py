@@ -564,7 +564,7 @@ class BilateralBars(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         w, h = self.width(), self.height()
         snap = self.snap
-        rows = [("BF", "bf_l", "bf_r", "股二头肌"), ("ST", "st_l", "st_r", "半腱肌"),
+        rows = [("ST", "st_l", "st_r", "半腱肌"), ("BF", "bf_l", "bf_r", "股二头肌"),
                 ("VL", "vl_l", "vl_r", "股外侧肌"), ("RF", "rf_l", "rf_r", "股直肌")]
         n = len(rows)
         row_h = (h - 22) / n
