@@ -79,7 +79,7 @@ def test_open_connect_ok_path_actually_connects(qapp, cfg, monkeypatch):
     from semg_desktop.ui import connect_dialog as cd
 
     def fake_exec(self):
-        self.rb_sim.setChecked(True)
+        self.rb_athlete.setChecked(True)
         return QDialog.Accepted
 
     monkeypatch.setattr(cd.ConnectDialog, "exec", fake_exec)
@@ -112,14 +112,14 @@ def test_connect_dialog_builds_sources(qapp, cfg):
     dlg = ConnectDialog(cfg)
     _KEEP.append(dlg)
     assert isinstance(dlg.source(), AthleteSimSource)   # 默认运动员模拟
-    dlg.rb_sim.setChecked(True)
-    assert isinstance(dlg.source(), SimulateSource)
     dlg.rb_tcp.setChecked(True)
     assert dlg.source().describe().startswith("TCP")
     dlg.rb_serial.setChecked(True)
     assert "串口" in dlg.source().describe()
     dlg.rb_replay.setChecked(True)
     assert dlg.source().name == "replay"
+    dlg.rb_athlete.setChecked(True)
+    assert isinstance(dlg.source(), AthleteSimSource)
     dlg.close()
 
 
@@ -151,6 +151,21 @@ def test_main_window_receives_simulated_stream(qapp):
     assert win.analysis.tbl.item(0, 1).text() != "—"
     win.close()
     assert win.acq is None
+
+
+def test_ota_sim_rows_cleared_on_disconnect(qapp):
+    """模拟设备只在选择模拟时出现在升级对象表；断开即清空，不挤占真实 BLE 节点。"""
+    win = MainWindow(source=SimulateSource(frame_period=0.01))
+    _KEEP.append(win)
+    win._select_nav("devices")
+    win.devices.inner.setCurrentWidget(win.ota)
+    _pump(qapp, win, 0.6)
+    assert len(win.ota.rows) == 9
+    assert all(r.simulated for r in win.ota.rows.values())
+    win.disconnect_source()
+    assert len(win.ota.rows) == 0
+    assert win.ota.tbl.rowCount() == 0
+    win.close()
 
 
 def test_main_window_record_then_export(qapp, tmp_path, monkeypatch):

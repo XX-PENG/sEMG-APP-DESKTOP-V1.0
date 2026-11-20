@@ -132,7 +132,7 @@ def test_node_from_advert_derives_kind_and_suffix():
 
 
 def test_suffix_from_name_when_address_missing():
-    # 新名字带全 MAC，取后 3 字节；旧名字 sEMG-ESP32-xxxxxx 也兼容
+    # 新名字带全 MAC、旧名字只带尾段，都归一成 MAC 尾段比对
     assert ota._suffix_from_name("EMG-aabbcca4cf01", "semg") == "A4:CF:01"
     assert ota._suffix_from_name("sEMG-aabbcca4cf01", "semg") == "A4:CF:01"
     assert ota._suffix_from_name("sEMG-ESP32-a4cf01", "semg") == "A4:CF:01"
@@ -915,7 +915,7 @@ def test_ota_view_threaded_scan_and_upgrade(qapp, cfg, tmp_path, monkeypatch):
     view.start_upgrade()
     _drain(qapp, view)
     assert view.rows["A4:CF:01"].state == "完成"
-    assert view.tbl.item(view._index["A4:CF:01"], 6).text() == "完成"
+    assert view.tbl.item(view._index["A4:CF:01"], 5).text() == "完成"
     assert view.bar.value() == 50  # 1024/2048
     view.close()
     _KEEP.append(view)
@@ -945,6 +945,35 @@ def test_ota_view_keeps_selection_across_rebuild(qapp, cfg):
     view.set_devices([{"kind": "imu", "mac": "AA:BB:CC:12:34:90", "full_mac": "AA:BB:CC:12:34:90",
                        "label": "IMU"}])  # 新设备出现会整表重绘
     assert [r.suffix for r in view._checked_rows()] == ["A4:CF:01"]
+    view.close()
+    _KEEP.append(view)
+
+
+def test_ota_view_sim_devices_only_while_simulated(qapp, cfg):
+    """模拟设备只在选择模拟源时显示；切回真实源/断开即清出表，真实扫描行不受影响。"""
+    from semg_desktop.ui.ota_view import OtaView
+
+    view = OtaView(cfg)
+    sim_rows = [{"kind": "semg", "mac": f"7C:DF:A1:A4:CF:0{i}",
+                 "full_mac": f"7C:DF:A1:A4:CF:0{i}", "label": f"CH{i}"} for i in range(1, 9)]
+    view.set_simulated(True)
+    view.set_devices(sim_rows)
+    assert len(view.rows) == 8
+    assert all(r.simulated and r.source == "模拟" for r in view.rows.values())
+
+    view._on_scanned([ota.Advert(name="EMG-DCB4D9281246", address="DC:B4:D9:28:12:46")])
+    assert len(view.rows) == 9
+
+    view.set_simulated(False)
+    assert list(view.rows) == ["28:12:46"]
+    assert view.tbl.rowCount() == 1
+    assert not view.rows["28:12:46"].simulated
+
+    # 真实源下再喂设备行按网关行处理，不会又被标成模拟
+    view.set_devices([{"kind": "imu", "mac": "7C:DF:A1:12:34:90",
+                       "full_mac": "7C:DF:A1:12:34:90", "label": "IMU"}])
+    assert view.rows["12:34:90"].source == "网关"
+    assert not view.rows["12:34:90"].simulated
     view.close()
     _KEEP.append(view)
 

@@ -27,7 +27,6 @@ from ..sources import (
     DataSource,
     ReplaySource,
     SerialSource,
-    SimulateSource,
     TcpSource,
     list_serial_ports,
 )
@@ -45,14 +44,13 @@ class ConnectDialog(QDialog):
         self.rb_serial = QRadioButton("USB 串口")
         self.rb_tcp = QRadioButton("TCP 透传")
         self.rb_replay = QRadioButton("回放原始日志")
-        self.rb_sim = QRadioButton("内置模拟信号")
-        self.rb_athlete = QRadioButton("运动员模拟（步态锁定）")
+        self.rb_athlete = QRadioButton("运动员模拟（内置信号 · 步态锁定）")
         self.rb_athlete.setChecked(True)
-        for rb in (self.rb_serial, self.rb_tcp, self.rb_replay, self.rb_sim, self.rb_athlete):
+        for rb in (self.rb_serial, self.rb_tcp, self.rb_replay, self.rb_athlete):
             rb.toggled.connect(self._switch)
 
         radios = QVBoxLayout()
-        for rb in (self.rb_athlete, self.rb_serial, self.rb_tcp, self.rb_replay, self.rb_sim):
+        for rb in (self.rb_athlete, self.rb_serial, self.rb_tcp, self.rb_replay):
             radios.addWidget(rb)
 
         self.ed_port = QLineEdit(cfg.serial.port or "")
@@ -99,18 +97,14 @@ class ConnectDialog(QDialog):
         f.addRow("倍速", self.sp_speed)
         f.addRow("", self.chk_nopace)
 
-        sim_panel = QWidget()
-        f = QFormLayout(sim_panel)
-        f.addRow("", QLabel("按网关文本协议生成 8 路 sEMG + 1 路 IMU，\n用于无硬件联调、界面演示与链路自检。"))
-
         athlete_panel = QWidget()
         f = QFormLayout(athlete_panel)
-        f.addRow("", QLabel("EMG 爆发与步态相位锁定、频谱随疲劳下移、\n"
-                            "左右不对称按档案推演。无硬件时演示完整判读闭环。\n"
-                            "输出仍是网关文本协议，解析/时标/录制与真实硬件一致。"))
+        f.addRow("", QLabel("按网关文本协议生成 8 路 sEMG + 大腿 IMU：EMG 爆发与步态相位锁定、\n"
+                            "频谱随疲劳下移、左右不对称按档案推演，无硬件时演示完整判读闭环。\n"
+                            "解析/时标/录制与真实硬件一致。"))
 
         self.stack = QStackedWidget()
-        for w in (serial_panel, tcp_panel, replay_panel, sim_panel, athlete_panel):
+        for w in (serial_panel, tcp_panel, replay_panel, athlete_panel):
             self.stack.addWidget(w)
 
         left = QVBoxLayout()
@@ -130,8 +124,7 @@ class ConnectDialog(QDialog):
             0 if self.rb_serial.isChecked()
             else 1 if self.rb_tcp.isChecked()
             else 2 if self.rb_replay.isChecked()
-            else 3 if self.rb_sim.isChecked()
-            else 4
+            else 3
         )
 
     def _refresh_ports(self) -> None:
@@ -155,8 +148,6 @@ class ConnectDialog(QDialog):
         if self.rb_replay.isChecked():
             return ReplaySource(self.ed_file.text().strip(), speed=self.sp_speed.value(),
                                 pace=not self.chk_nopace.isChecked())
-        if self.rb_sim.isChecked():
-            return SimulateSource()
         if self.rb_athlete.isChecked():
             return AthleteSimSource()
         return SerialSource(self.ed_port.text().strip(), baudrate=self.sp_baud.value(),

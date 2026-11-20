@@ -97,7 +97,7 @@ host_time   = offset + device_time + i × period / n
 - `Δseq > 1` 在时间轴上留下等长缺口，掉样看得见，不会被插值抹平。
 - `seq` 按 uint16 回绕解算；`Δseq > max_gap(256)` 视为节点重启，重锚而不是补 5 s 空洞。
 
-通道身份用 **MAC 后 3 字节**而不是槽位号：槽位是连接顺序的产物，重连就会变，MAC 不会。映射写入 `config/default.json` 的 `channel_map`，多次会话之间 CH1…CH8 的位置保持稳定。
+通道身份用 **MAC**而不是槽位号：槽位是连接顺序的产物，重连就会变，MAC 不会。映射写入 `config/default.json` 的 `channel_map`，多次会话之间 CH1…CH8 的位置保持稳定。
 
 ---
 
@@ -201,7 +201,7 @@ records/rec-YYYYmmdd-HHMMSS/
 ├── manifest.json     # 起始 UTC、数据源描述、通道映射、字节/样本数、配置快照
 └── parsed/
     ├── data.npz      # 每设备 t（相对会话秒）+ semg@MAC / ax_g@IMU…mz_raw@MAC
-    └── data_long.csv # export 生成：t_seconds, device_mac_suffix, signal, value
+    └── data_long.csv # export 生成：t_seconds, device_mac, signal, value
 ```
 
 热路径只做"字节 tee + 数组追加"两件事，CSV 格式化留给离线 `export`，避免每秒上万次字符串拼接挤占采集线程。
@@ -266,7 +266,7 @@ records/rec-YYYYmmdd-HHMMSS/
 3. 打开"固件升级 (OTA)"页 → 选 EMG / IMU 固件 → **扫描 BLE 节点** → 勾选 → 开始升级。
 4. 阶段 2 不用管网关：网关只连 `EMG-*` / `IMU-*`（兼容旧 `sEMG-*`），不会去抢 `nimble-ble-ota`。
 
-设备行按 MAC 后 3 字节归并，两个来源合成一张表：
+设备行按 MAC 归并，两个来源合成一张表：
 
 | 来源 | 提供什么 |
 | --- | --- |

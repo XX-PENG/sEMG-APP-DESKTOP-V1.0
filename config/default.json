@@ -66,13 +66,13 @@
     "tcp_capacity_bytes_per_second": 11520
   },
   "channel_map": {
-    "semg@2202fa": 0,
-    "semg@2201da": 1,
-    "semg@342d5e": 2,
-    "semg@278976": 3,
-    "semg@281246": 4,
-    "semg@342e06": 5,
-    "semg@351eca": 6,
-    "semg@2202b6": 7
+    "semg@dcb4d92202fa": 0,
+    "semg@dcb4d92201da": 1,
+    "semg@dcb4d9342d5e": 2,
+    "semg@dcb4d9278976": 3,
+    "semg@dcb4d9281246": 4,
+    "semg@dcb4d9342e06": 5,
+    "semg@dcb4d9351eca": 6,
+    "semg@dcb4d92202b6": 7
   }
 }

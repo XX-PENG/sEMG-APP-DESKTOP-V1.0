@@ -62,11 +62,9 @@ class DeviceState:
 
     @property
     def label(self) -> str:
-        if self.index is None:
-            return f"IMU {self.info.mac}"
         if self.info.kind == "imu":
-            return f"IMU {self.info.mac}"
-        return f"CH{self.index + 1} {self.info.mac}"
+            return "IMU"
+        return f"CH{self.index + 1}" if self.index is not None else ""
 
 
 @dataclass

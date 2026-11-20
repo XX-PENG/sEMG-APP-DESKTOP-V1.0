@@ -10,7 +10,7 @@
 
 与工厂脚本 tools/ble_ota_send.py 的协议完全一致，区别是这里嵌进上位机：进度回调、可取消、
 按 BLE 地址锁定节点。地址锁定是必须的——接收固件对所有板子广播同一个名字
-`nimble-ble-ota`，而 8 路 EMG 的应用广播名只带 MAC 后 3 字节。好消息是网关 connected 行里的
+`nimble-ble-ota`，光比名字分不清是哪块板。好消息是网关 connected 行里的
 `mac=` 就是节点完整 BLE 地址，接收固件又沿用同一份 eFuse 公版地址，所以两个阶段都能对上。
 
 两条硬性约束来自固件本身，界面必须讲清楚：
@@ -219,7 +219,7 @@ class OtaNode:
     """一个可升级对象。address 未知时只能靠广播名认，多台同型号在 OTA 模式时会分不清。"""
 
     kind: str                     # "semg" | "imu" | "" （只认到接收固件时类型未知）
-    suffix: str = ""              # MAC 后 3 字节，如 "A4:CF:01"
+    suffix: str = ""              # MAC 尾段，如 "A4:CF:01"，供旧固件短广播名兜底匹配
     address: str | None = None    # 完整 6 字节，如 "7C:DF:A1:A4:CF:01"
     label: str = ""               # 界面显示名："CH3" / "IMU"
     source: str = ""              # "网关" / "扫描" / "网关+扫描"
@@ -246,7 +246,7 @@ class OtaNode:
 
 
 def node_from_row(row: dict) -> OtaNode:
-    """由 pipeline.device_rows() 的一行构造。mac 为完整 6 字节，suffix 取后 3 字节供广播名兜底匹配。"""
+    """由 pipeline.device_rows() 的一行构造。mac 为完整 6 字节，suffix 供旧固件广播名兜底匹配。"""
     mac = row["mac"]
     return OtaNode(kind=row["kind"], suffix=":".join(mac.split(":")[3:]),
                    address=row.get("full_mac") or mac,
@@ -262,9 +262,9 @@ def node_from_advert(adv: Advert) -> OtaNode | None:
 
 
 def _suffix_from_name(name: str, kind: str) -> str:
-    """从广播名还原 MAC 后 3 字节（与网关数据行的后缀一致）。
+    """从广播名还原 MAC 尾段，供地址未知时兜底匹配。
 
-    新名字带全 6 字节 MAC（EMG-DCB4D9281246），取后 3 字节；旧名字 sEMG-ESP32-xxxxxx 也兼容。
+    新名字带全 6 字节 MAC（EMG-DCB4D9281246），旧名字 sEMG-ESP32-xxxxxx 只带尾段，都兼容。
     """
     upper = name.upper()
     tail = ""
@@ -293,7 +293,7 @@ def match_app(adverts: Iterable[Advert], node: OtaNode, prefix: str = RECEIVER_N
         for a in advs:
             if a.address.upper() == node.address.upper():
                 return a
-    # 名字兜底：比"名里的 MAC 后 3 字节"，新旧名字格式（全 MAC / 旧 3 字节）都认得
+    # 名字兜底：比"名里的 MAC 尾段"，新旧名字格式（全 MAC / 旧短名）都认得
     if node.suffix:
         for a in advs:
             if a.kind == node.kind and _suffix_from_name(a.name, node.kind) == node.suffix:

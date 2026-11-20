@@ -40,7 +40,7 @@ from .imu_view import ImuView
 from .ota_view import OtaView
 from .status_panel import StatusPanel
 
-MAP_COLS = ["通道", "肌肉", "MAC 后 3 字节", "状态", "实测速率", "帧", "丢帧缺口"]
+MAP_COLS = ["通道", "肌肉", "MAC", "状态", "实测速率", "帧", "丢帧缺口"]
 
 _TOP_RX, _TOP_RY = 56.0, 42.0     # 大腿横断面设计半径
 # 解剖槽位（横断面设计坐标，前侧朝上；x 以外侧为正，乘 side 系数镜像）：

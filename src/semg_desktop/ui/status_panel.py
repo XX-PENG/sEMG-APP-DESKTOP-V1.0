@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-DEVICE_COLUMNS = ["通道", "MAC后3字节", "类型", "槽位", "状态", "帧", "样本", "实测速率", "最后seq",
+DEVICE_COLUMNS = ["通道", "MAC", "类型", "槽位", "状态", "帧", "样本", "实测速率", "最后seq",
                   "drop", "丢帧缺口", "节点重启", "重锚", "缓冲样本", "距今ms"]
 BAD = QColor(255, 120, 120)
 WARN = QColor(255, 200, 110)

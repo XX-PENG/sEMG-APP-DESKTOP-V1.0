@@ -36,7 +36,7 @@ from ..guard.roster import Roster
 from ..guard.session import build_summary
 from ..pipeline import Acquisition, ChannelMap
 from ..recorder import Recording, new_session_dir
-from ..sources import AthleteSimSource, SourceError
+from ..sources import AthleteSimSource, SimulateSource, SourceError
 from . import theme as T
 from .connect_dialog import ConnectDialog
 from .cues import CueAudio
@@ -422,6 +422,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "连接失败", f"{type(exc).__name__}: {exc}")
             return
         self.acq = acq
+        self.ota.set_simulated(isinstance(source, SimulateSource))
         self.analysis.acq = acq
         self.btn_disconnect.setEnabled(True)
         if self.engine:
@@ -449,6 +450,7 @@ class MainWindow(QMainWindow):
                 except OSError as exc:
                     self.lbl_status.setText(f"通道映射写入失败：{exc}")
         self.acq = None
+        self.ota.set_simulated(False)
         self.analysis.acq = None
         self.btn_disconnect.setEnabled(False)
         self.lbl_link.setText("链路未连接")

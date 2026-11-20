@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from .. import ota
 from ..config import Config
 
-COLUMNS = ["升级", "类型", "通道", "MAC 后 3 字节", "BLE 地址", "固件", "状态"]
+COLUMNS = ["升级", "类型", "通道", "MAC", "固件", "状态"]
 KIND_TITLES = {"semg": "EMG", "imu": "IMU"}
 BAD = QColor(255, 120, 120)
 WARN = QColor(255, 200, 110)
@@ -45,7 +45,7 @@ DIM = QColor(200, 200, 200)
 
 @dataclass
 class OtaRow:
-    """一台板子。行按 MAC 后 3 字节归并：应用固件和接收固件是同一块板，不该占两行。"""
+    """一台板子。应用固件和接收固件是同一块板，按 MAC 归并成一行，不占两行。"""
 
     suffix: str
     kind: str = ""
@@ -57,10 +57,11 @@ class OtaRow:
     receiver: bool = False             # 此刻正广播接收固件（上次升级没做完）
     checked: bool = False
     busy: bool = False
+    simulated: bool = False            # 模拟源推出来的设备，切回真实源时清掉
 
     @property
     def title(self) -> str:
-        return self.label or self.suffix or self.address or "未知设备"
+        return self.label or self.address or self.suffix or "未知设备"
 
     def node(self) -> ota.OtaNode:
         return ota.OtaNode(kind=self.kind, suffix=self.suffix, address=self.address,
@@ -111,6 +112,7 @@ class OtaView(QWidget):
         super().__init__(parent)
         self.cfg = cfg
         self.rows: dict[str, OtaRow] = {}
+        self._simulated = False
         self.defaults: dict[str, str] = {k: str(v or "") for k, v in (cfg.ota.default_bins or {}).items()}
         self._job: _JobThread | None = None
         self._sig = _JobSignals(self)
@@ -265,28 +267,45 @@ class OtaView(QWidget):
             row = self.rows.get(key)
             if row is None:
                 self.rows[key] = OtaRow(suffix=key, kind=node.kind, address=node.address,
-                                       label=node.label, source="网关")
+                                       label=node.label, source="模拟" if self._simulated else "网关",
+                                       simulated=self._simulated)
                 changed = True
                 continue
             if row.kind != node.kind or row.address != node.address or row.label != node.label:
                 row.kind, row.address, row.label = node.kind, node.address, node.label
                 changed = True
-            if "网关" not in row.source:
+            if "网关" not in row.source and not self._simulated:
                 row.source = "+".join([s for s in (row.source, "网关") if s])
                 changed = True
         if changed:
             self._rebuild()
 
+    def set_simulated(self, simulated: bool) -> None:
+        """模拟设备只在选择模拟源时显示；切到真实源或断开就把它们清出升级对象表。"""
+        self._simulated = simulated
+        if not simulated:
+            self._purge_sim_rows()
+
+    def _purge_sim_rows(self) -> None:
+        if self._job is not None:      # 升级进行中不动表，等任务收尾再清
+            return
+        stale = [k for k, r in self.rows.items() if r.simulated]
+        if not stale:
+            return
+        for k in stale:
+            del self.rows[k]
+        self._rebuild()
+
     def _on_scanned(self, advs: list[ota.Advert]) -> None:
         changed = False
         for adv in advs:
             node = ota.node_from_advert(adv)
-            if node is not None:  # 应用固件：带类型与后 3 字节
+            if node is not None:  # 应用固件：带类型与完整 MAC
                 key = node.suffix or adv.address
                 row = self.rows.get(key)
                 if row is None:
                     self.rows[key] = OtaRow(suffix=key, kind=node.kind, address=node.address,
-                                           label=node.app_name, source="扫描")
+                                           label="", source="扫描")
                     changed = True
                     continue
                 if row.address != node.address or row.kind != node.kind:
@@ -304,7 +323,7 @@ class OtaView(QWidget):
                 row = self.rows.get(key)
                 if row is None:
                     self.rows[key] = OtaRow(suffix=key, address=adv.address, source="扫描",
-                                            label=adv.address, receiver=True)
+                                            label="", receiver=True)
                     changed = True
                 else:
                     row.address, row.receiver = adv.address, True
@@ -341,7 +360,7 @@ class OtaView(QWidget):
             kind = KIND_TITLES.get(row.kind, "未知")
             if row.receiver:
                 kind += " · 接收中"
-            cells = [kind, row.label or "—", row.suffix or "—", row.address or "未知",
+            cells = [kind, row.label or "—", row.address or "未知",
                      self._firmware_text(row), row.state]
             for c, text in enumerate(cells, start=1):
                 item = QTableWidgetItem(text)
@@ -479,18 +498,8 @@ class OtaView(QWidget):
             QMessageBox.warning(self, "还不能开始", "\n".join(problems))
             return
         opts = self.options()
-        text = "\n".join(f"• {row.title}  {row.address or '只认广播名'}  ←  {Path(path).name}"
-                         for row, _, path in jobs)
-        gateway = (
-            "升级前请先关闭网关（拔掉它的 USB 就行）：\n"
-            "  应用固件被网关连着时不广播，阶段 1 搜不到它，也就写不进触发字。\n"
-            f"不想断电：点开始之后再把它搬远也可以，阶段 1 会持续等 {opts.trigger_wait:.0f}s，\n"
-            "  网关 4s 监督超时一断开，节点恢复广播就会自动被抢下。\n"
-            "进入阶段 2 后网关随时可以恢复供电 —— 它不认 nimble-ble-ota，不会来抢这条连接。\n\n"
-        )
         if QMessageBox.question(self, "确认升级",
-                                f"将依次升级 {len(jobs)} 个节点：\n{text}\n\n{gateway}"
-                                "升级期间对应通道波形中断；新固件启动自检失败时由 bootloader 回滚到旧槽。\n\n开始？"
+                                f"将依次升级 {len(jobs)} 个节点。\n升级前请先关闭网关。"
                                 ) != QMessageBox.Yes:
             return
         self.log.clear()
@@ -553,6 +562,8 @@ class OtaView(QWidget):
         self._set_enabled(True)
         self.btn_cancel.setEnabled(False)
         self.lbl_current.setText("空闲")
+        if not self._simulated:
+            self._purge_sim_rows()
 
     def _set_enabled(self, enabled: bool) -> None:
         for w in (self.btn_scan, self.btn_start, self.tbl, self.ed_emg, self.ed_imu,
@@ -588,10 +599,10 @@ class OtaView(QWidget):
         i = self._index.get(row.suffix)
         if i is None:
             return
-        item = self.tbl.item(i, 6)
+        item = self.tbl.item(i, 5)
         if item is None:
             item = QTableWidgetItem()
-            self.tbl.setItem(i, 6, item)
+            self.tbl.setItem(i, 5, item)
         item.setText(row.state)
         color = GOOD if row.state.startswith("完成") else BAD if row.state.startswith("失败") else \
             WARN if row.state != "空闲" else DIM
