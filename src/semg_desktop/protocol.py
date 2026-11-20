@@ -10,9 +10,9 @@
 协议事实（已对照网关源码核实）：
 
     sEMG 帧（1 行）
-        3/9 semg A4:CF:FF seq=1234 cnt=40 drop=0 12 -3 145 ...
+        3/9 semg 7C:DF:A1:A4:CF:FF seq=1234 cnt=40 drop=0 12 -3 145 ...
     IMU 帧（1 + cnt 行）
-        9/9 imu 12:34:56 seq=77 cnt=10 drop=2
+        9/9 imu 7C:DF:A1:12:34:56 seq=77 cnt=2 drop=2
         0.012 -0.004 0.998 1.200 -0.300 0.000 123 -45 68
         ...
     状态行（可能带 ESP_LOG 前缀与 ANSI 颜色）
@@ -21,7 +21,7 @@
         W (1234) GW: print queue overflow(total)=17
         ping_rtt conn=3 us=45120
 
-数据行里的 MAC 只有后 3 字节，等于 connected 行完整 MAC 的最后 3 段，两者可直接对照。
+数据行里的 MAC 为完整 6 字节，与 connected 行直接对照，解析器以它作为设备键。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import numpy as np
 
 HEADER_RE = re.compile(
     r"^(?P<slot>\d+)/(?P<active>\d+)[ \t]+(?P<kind>semg|imu)[ \t]+"
-    r"(?P<mac>(?:[0-9A-Fa-f]{2}:){2}[0-9A-Fa-f]{2})"
+    r"(?P<mac>(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})"
     r"[ \t]+seq=(?P<seq>\d+)[ \t]+cnt=(?P<cnt>\d+)[ \t]+drop=(?P<drop>\d+)(?P<rest>.*)$"
 )
 LOG_PREFIX_RE = re.compile(r"^[EWIDV][ \t]+\(\s*\d+\s*\)[ \t]+[^\s:]{1,32}:[ \t]*")
@@ -318,11 +318,9 @@ class GatewayParser:
         if m:
             kind = "imu" if m.group("type").lower() == "imu" else "semg"
             full = m.group("fullmac").upper()
-            suffix = ":".join(full.split(":")[3:])
-            dev = self._device(kind, suffix, int(m.group("slot")) + 1, 0, t)
+            dev = self._device(kind, full, int(m.group("slot")) + 1, 0, t)
             dev.online = True
             dev.conn = int(m.group("conn"))
-            dev.full_mac = full
             dev.slot = int(m.group("slot")) + 1
             self.stats.status_lines += 1
             self._emit_status(StatusEvent("connected", text, slot=int(m.group("slot")),
@@ -361,6 +359,7 @@ class GatewayParser:
             dev = DeviceInfo(key=key, kind=kind, mac=mac.upper(), slot=slot, online=True)
             self.devices[key] = dev
         dev.slot = slot
+        dev.full_mac = mac
         dev.last_t = t
         if dev.conn is None:
             dev.online = True

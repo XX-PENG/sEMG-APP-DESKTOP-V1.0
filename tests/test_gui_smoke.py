@@ -70,7 +70,7 @@ def test_simulate_does_not_pollute_channel_map(qapp, tmp_path):
     win.disconnect_source()
     win.close()
     saved = json.loads(cfg_file.read_text(encoding="utf-8"))["channel_map"]
-    assert not any(k.startswith("semg@a4cf") for k in saved)
+    assert not any(k.startswith("semg@7cdfa1a4cf") for k in saved)
 
 
 def test_open_connect_ok_path_actually_connects(qapp, cfg, monkeypatch):

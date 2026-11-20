@@ -166,7 +166,7 @@ def export_csv(session_root: Path | str, columns: list[str] | None = None) -> Pa
     out = session_root / "parsed" / "data_long.csv"
     with out.open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        w.writerow(["t_seconds", "device_mac_suffix", "signal", "value"])
+        w.writerow(["t_seconds", "device_mac", "signal", "value"])
         w.writerows(rows)
     return out
 

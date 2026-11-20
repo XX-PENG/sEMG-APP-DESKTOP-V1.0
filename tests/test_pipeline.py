@@ -43,7 +43,7 @@ def test_pipeline_discovers_eight_semg_and_one_imu(sim_file):
     assert sorted(r["index"] for r in semg) == list(range(8))
     assert imu[0]["index"] is None
     assert all(r["samples"] == FRAMES * 40 for r in semg)
-    assert imu[0]["samples"] == FRAMES * 10
+    assert imu[0]["samples"] == FRAMES * 4
     assert acq.parser.stats.parse_errors == 0
 
 
@@ -82,7 +82,7 @@ def test_windows_and_metrics(sim_file):
     assert metrics[0].rate == pytest.approx(2000.0, rel=0.01)
 
     t_imu, samples = acq.imu_window(t_now + 1.0)
-    assert samples.shape == (FRAMES * 10, 9)
+    assert samples.shape == (FRAMES * 4, 9)
     latest = acq.imu_latest()
     assert latest is not None and latest.size == 9
     assert np.allclose(latest[:3], samples[-1][:3])
@@ -90,9 +90,9 @@ def test_windows_and_metrics(sim_file):
 
 def test_seq_gap_is_reported_as_lost_frames(sim_file, tmp_path):
     text = (
-        "1/9 semg A4:CF:01 seq=100 cnt=40 drop=0 " + " ".join(["7"] * 40) + "\n"
-        "1/9 semg A4:CF:01 seq=101 cnt=40 drop=0 " + " ".join(["7"] * 40) + "\n"
-        "1/9 semg A4:CF:01 seq=106 cnt=40 drop=250 " + " ".join(["7"] * 40) + "\n"
+        "1/9 semg 7C:DF:A1:A4:CF:01 seq=100 cnt=40 drop=0 " + " ".join(["7"] * 40) + "\n"
+        "1/9 semg 7C:DF:A1:A4:CF:01 seq=101 cnt=40 drop=0 " + " ".join(["7"] * 40) + "\n"
+        "1/9 semg 7C:DF:A1:A4:CF:01 seq=106 cnt=40 drop=250 " + " ".join(["7"] * 40) + "\n"
     )
     path = tmp_path / "gap.log"
     path.write_text(text)
@@ -110,9 +110,9 @@ def test_restart_counted_separately_from_frame_gaps(tmp_path):
     """seq 从 58560 归零：这是节点重启，不能报成丢了 6976 帧。"""
     body = " ".join(["7"] * 40)
     text = (
-        f"1/9 semg A4:CF:01 seq=58560 cnt=40 drop=0 {body}\n"
-        f"1/9 semg A4:CF:01 seq=1 cnt=40 drop=0 {body}\n"
-        f"1/9 semg A4:CF:01 seq=2 cnt=40 drop=0 {body}\n"
+        f"1/9 semg 7C:DF:A1:A4:CF:01 seq=58560 cnt=40 drop=0 {body}\n"
+        f"1/9 semg 7C:DF:A1:A4:CF:01 seq=1 cnt=40 drop=0 {body}\n"
+        f"1/9 semg 7C:DF:A1:A4:CF:01 seq=2 cnt=40 drop=0 {body}\n"
     )
     path = tmp_path / "restart.log"
     path.write_text(text)
@@ -178,8 +178,8 @@ def test_export_csv_from_session(sim_file, tmp_path):
     acq.stop_recording()
     out = export_csv(tmp_path / "session2")
     lines = out.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "t_seconds,device_mac_suffix,signal,value"
-    assert len(lines) - 1 == FRAMES * 40 * 8 + FRAMES * 10 * 9
+    assert lines[0] == "t_seconds,device_mac,signal,value"
+    assert len(lines) - 1 == FRAMES * 40 * 8 + FRAMES * 4 * 9
 
 
 def test_source_error_stops_cleanly(tmp_path):
@@ -195,7 +195,7 @@ def test_imu_attitude_tracks_yaw_from_gyro(tmp_path):
     """绕重力轴旋转时加速度计读数不变，航向必须由陀螺积分给出。"""
     lines = []
     for seq in range(50):
-        lines.append(f"1/1 imu A4:CF:09 seq={seq} cnt=4 drop=0")
+        lines.append(f"1/1 imu 7C:DF:A1:A4:CF:09 seq={seq} cnt=4 drop=0")
         # 传感器静置 az=-1（重力向量）；陀螺与显示系同向 +90dps 绕 Z
         lines.extend(["0.000 0.000 -1.000 0.000 0.000 90.000 0 0 0"] * 4)
     path = tmp_path / "yaw.log"
@@ -213,7 +213,7 @@ def test_imu_attitude_tracks_yaw_from_gyro(tmp_path):
 
 def test_imu_attitude_absent_without_imu(tmp_path):
     path = tmp_path / "semg_only.log"
-    path.write_text("1/1 semg A4:CF:01 seq=0 cnt=40 drop=0 " + " ".join(["7"] * 40) + "\n")
+    path.write_text("1/1 semg 7C:DF:A1:A4:CF:01 seq=0 cnt=40 drop=0 " + " ".join(["7"] * 40) + "\n")
     acq = Acquisition(ReplaySource(path, pace=False), load_config(None))
     acq.source.open()
     drain(acq)

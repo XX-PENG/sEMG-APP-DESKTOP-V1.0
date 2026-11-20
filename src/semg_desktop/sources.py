@@ -20,8 +20,9 @@ from pathlib import Path
 import numpy as np
 from scipy import signal
 
-DEFAULT_SEMG_MACS = ["A4:CF:01", "A4:CF:02", "A4:CF:03", "A4:CF:04", "A4:CF:05", "A4:CF:06", "A4:CF:07", "A4:CF:08"]
-DEFAULT_IMU_MAC = "12:34:90"
+DEFAULT_SEMG_MACS = ["7C:DF:A1:A4:CF:01", "7C:DF:A1:A4:CF:02", "7C:DF:A1:A4:CF:03", "7C:DF:A1:A4:CF:04",
+                     "7C:DF:A1:A4:CF:05", "7C:DF:A1:A4:CF:06", "7C:DF:A1:A4:CF:07", "7C:DF:A1:A4:CF:08"]
+DEFAULT_IMU_MAC = "7C:DF:A1:12:34:90"
 
 
 class SourceError(RuntimeError):
@@ -231,7 +232,7 @@ class SimulateSource(DataSource):
     name = "simulate"
 
     def __init__(self, semg_channels: int = 8, frame_period: float = 0.02,
-                 semg_rate: float = 2000.0, imu_rate: float = 500.0, jitter: float = 0.006,
+                 semg_rate: float = 2000.0, imu_rate: float = 200.0, jitter: float = 0.006,
                  loss_prob: float = 0.002) -> None:
         self.semg_channels = semg_channels
         self.frame_period = frame_period
@@ -253,12 +254,12 @@ class SimulateSource(DataSource):
     def open(self) -> None:
         self._t_next = time.monotonic()
         lines = [
-            f"I ({i * 120 + 40}) GW: Sensor connected: slot={i} conn={i} type=sEMG mac=AA:BB:CC:{DEFAULT_SEMG_MACS[i]}"
+            f"I ({i * 120 + 40}) GW: Sensor connected: slot={i} conn={i} type=sEMG mac={DEFAULT_SEMG_MACS[i]}"
             for i in range(self.semg_channels)
         ]
         lines.append(
             f"I ({self.semg_channels * 120}) GW: Sensor connected: slot={self.semg_channels} "
-            f"conn={self.semg_channels} type=IMU mac=AA:BB:CC:{DEFAULT_IMU_MAC}"
+            f"conn={self.semg_channels} type=IMU mac={DEFAULT_IMU_MAC}"
         )
         self._t_first = time.monotonic()
         self._t_last = self._t_first

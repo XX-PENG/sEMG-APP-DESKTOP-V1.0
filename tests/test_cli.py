@@ -23,7 +23,7 @@ def test_cli_parse_on_generated_log(tmp_path, capsys):
     code = main(["parse", str(path)])
     out = capsys.readouterr().out
     assert code == 0
-    rows = [ln for ln in out.splitlines() if ln.startswith(("A4:CF:", "12:34:"))]
+    rows = [ln for ln in out.splitlines() if ln.startswith(("7C:DF:A1:A4:CF:", "7C:DF:A1:12:34:"))]
     assert len(rows) == 9
     assert "imu块截断=0" in out and "垃圾行=0" in out
     assert "2000.0/s" in out

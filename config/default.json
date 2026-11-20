@@ -17,7 +17,7 @@
   "protocol": {
     "frame_period_seconds": 0.02,
     "semg_nominal_rate": 2000.0,
-    "imu_nominal_rate": 500.0,
+    "imu_nominal_rate": 200.0,
     "pll_gain": 0.02,
     "resync_threshold_seconds": 0.3,
     "max_frame_gap": 256

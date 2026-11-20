@@ -63,10 +63,10 @@ semg-desktop.exe，否则 COLLECT 清理 dist 时会因 DLL 被占用而报 Perm
 
 | 网关输出 | 本工具解析动作 |
 | --- | --- |
-| `3/9 semg A4:CF:01 seq=1234 cnt=40 drop=0 101 -98 …` | 一行即一帧，尾部整数按 int16 定点值直接入通道环形缓冲 |
-| `9/9 imu 12:34:90 seq=57 cnt=10 drop=1` | 头部行只建立"待收块"上下文，**不产生样本** |
+| `3/9 semg 7C:DF:A1:A4:CF:01 seq=1234 cnt=40 drop=0 101 -98 …` | 一行即一帧，尾部整数按 int16 定点值直接入通道环形缓冲 |
+| `9/9 imu 7C:DF:A1:12:34:90 seq=57 cnt=4 drop=1` | 头部行只建立"待收块"上下文，**不产生样本** |
 | `0.012 -0.004 0.998 1.200 -0.300 0.000 123 -45 68` | 9 字段数据行，收满 `cnt` 行后一次性成帧（ax ay az 单位 g，gx gy gz 单位 dps，磁力计原始 int16） |
-| `I (402) GW: Sensor connected: slot=2 conn=3 type=sEMG mac=AA:BB:CC:A4:CF:01` | 登记设备：完整 MAC、槽位、类型，标记在线 |
+| `I (402) GW: Sensor connected: slot=2 conn=3 type=sEMG mac=7C:DF:A1:A4:CF:01` | 登记设备：完整 MAC、槽位、类型，标记在线 |
 | `I (…) GW: Sensor disconnected: slot=2 conn=3` | 标记离线（保留曲线与统计，便于回看掉线前波形） |
 | `W (…) GW: print queue overflow(total)=17` | 计入链路告警，面板"判读提示"里点名 |
 | `ping_rtt conn=3 us=45120` | 记录往返时延 |

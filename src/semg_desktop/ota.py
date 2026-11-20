@@ -246,8 +246,10 @@ class OtaNode:
 
 
 def node_from_row(row: dict) -> OtaNode:
-    """由 pipeline.device_rows() 的一行构造。full_mac 来自网关 connected 行。"""
-    return OtaNode(kind=row["kind"], suffix=row["mac"], address=row.get("full_mac"),
+    """由 pipeline.device_rows() 的一行构造。mac 为完整 6 字节，suffix 取后 3 字节供广播名兜底匹配。"""
+    mac = row["mac"]
+    return OtaNode(kind=row["kind"], suffix=":".join(mac.split(":")[3:]),
+                   address=row.get("full_mac") or mac,
                    label=row.get("label", ""), source="网关")
 
 

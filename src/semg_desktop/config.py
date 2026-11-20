@@ -26,7 +26,7 @@ class TcpConfig:
 class ProtocolConfig:
     frame_period_seconds: float = 0.02
     semg_nominal_rate: float = 2000.0
-    imu_nominal_rate: float = 500.0
+    imu_nominal_rate: float = 200.0
     pll_gain: float = 0.02
     resync_threshold_seconds: float = 0.30
     max_frame_gap: int = 256

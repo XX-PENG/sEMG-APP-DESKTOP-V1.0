@@ -111,7 +111,7 @@ def test_load_firmware_checks(tmp_path, monkeypatch):
 
 
 def test_node_from_gateway_row_uses_full_mac_as_address():
-    row = {"kind": "semg", "mac": "A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01", "label": "CH3"}
+    row = {"kind": "semg", "mac": "AA:BB:CC:A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01", "label": "CH3"}
     node = ota.node_from_row(row)
     assert node.kind == "semg"
     assert node.address == "AA:BB:CC:A4:CF:01"
@@ -842,8 +842,8 @@ def test_ota_view_lists_gateway_nodes_and_firmware_defaults(qapp, cfg, tmp_path)
     qapp.processEvents()
 
     view.set_devices([
-        {"kind": "semg", "mac": "A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01", "label": "CH1"},
-        {"kind": "imu", "mac": "12:34:90", "full_mac": "AA:BB:CC:12:34:90", "label": "IMU 12:34:90"},
+        {"kind": "semg", "mac": "AA:BB:CC:A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01", "label": "CH1"},
+        {"kind": "imu", "mac": "AA:BB:CC:12:34:90", "full_mac": "AA:BB:CC:12:34:90", "label": "IMU 12:34:90"},
     ])
     assert set(view.rows) == {"A4:CF:01", "12:34:90"}
     assert view.tbl.rowCount() == 2
@@ -863,7 +863,7 @@ def test_ota_view_merges_scan_into_same_row(qapp, cfg):
     from semg_desktop.ui.ota_view import OtaView
 
     view = OtaView(cfg)
-    view.set_devices([{"kind": "semg", "mac": "A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01",
+    view.set_devices([{"kind": "semg", "mac": "AA:BB:CC:A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01",
                        "label": "CH1"}])
     view._on_scanned([ota_mod.Advert(name="EMG-AABBCCA4CF01", address="AA:BB:CC:A4:CF:01")])
     assert len(view.rows) == 1
@@ -937,12 +937,12 @@ def test_ota_view_keeps_selection_across_rebuild(qapp, cfg):
     from semg_desktop.ui.ota_view import OtaView
 
     view = OtaView(cfg)
-    view.set_devices([{"kind": "semg", "mac": "A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01",
+    view.set_devices([{"kind": "semg", "mac": "AA:BB:CC:A4:CF:01", "full_mac": "AA:BB:CC:A4:CF:01",
                        "label": "CH1"}])
     item = view.tbl.item(0, 0)
     item.setCheckState(Qt.Checked)
     assert view.rows["A4:CF:01"].checked
-    view.set_devices([{"kind": "imu", "mac": "12:34:90", "full_mac": "AA:BB:CC:12:34:90",
+    view.set_devices([{"kind": "imu", "mac": "AA:BB:CC:12:34:90", "full_mac": "AA:BB:CC:12:34:90",
                        "label": "IMU"}])  # 新设备出现会整表重绘
     assert [r.suffix for r in view._checked_rows()] == ["A4:CF:01"]
     view.close()

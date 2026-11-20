@@ -34,9 +34,9 @@ def test_simulator_frame_content_counts():
     imu = [e for e in events if e.kind == "imu"]
     assert len(semg) == 40 and len(imu) == 5
     assert all(e.values.size == 40 for e in semg)
-    assert all(e.samples.shape == (10, 9) for e in imu)
+    assert all(e.samples.shape == (4, 9) for e in imu)
     assert parser.stats.parse_errors == 0
-    assert parser.stats.imu_sample_lines == 50
+    assert parser.stats.imu_sample_lines == 20
 
 
 def test_simulator_imu_values_are_in_physical_range():
