@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from .. import ota
 from ..config import Config
 
-COLUMNS = ["升级", "类型", "通道", "MAC", "固件", "状态"]
+COLUMNS = ["升级", "类型", "通道", "MAC", "当前版本", "固件", "状态"]
 KIND_TITLES = {"semg": "EMG", "imu": "IMU"}
 BAD = QColor(255, 120, 120)
 WARN = QColor(255, 200, 110)
@@ -53,6 +53,7 @@ class OtaRow:
     label: str = ""
     source: str = ""
     firmware: str = ""                 # 逐行覆盖，空则用该类型的默认固件
+    version: str = ""                  # 设备正在运行的固件版本（0xFFF2 读回），空=未知
     state: str = "空闲"
     receiver: bool = False             # 此刻正广播接收固件（上次升级没做完）
     checked: bool = False
@@ -72,6 +73,7 @@ class _JobSignals(QObject):
     log = Signal(str)
     progress = Signal(str, int, int)   # 行 key，已完成字节，总字节
     state = Signal(str, str)
+    version = Signal(str, str)         # 行 key，设备当前固件版本
     scanned = Signal(object)           # list[ota.Advert]
     failed = Signal(str)
     finished = Signal()
@@ -96,7 +98,8 @@ class _JobThread(threading.Thread):
 
         rep = ota.OtaReporter(on_log=self._sig.log.emit,
                               on_progress=lambda d, t: self._sig.progress.emit(last["key"], d, t),
-                              on_state=on_state, cancel=self.cancel)
+                              on_state=on_state, on_version=self._sig.version.emit,
+                              cancel=self.cancel)
         try:
             self._fn(rep)
         except ota.OtaCancelled:
@@ -119,6 +122,7 @@ class OtaView(QWidget):
         self._sig.log.connect(self._on_log)
         self._sig.progress.connect(self._on_progress)
         self._sig.state.connect(self._on_state)
+        self._sig.version.connect(self._on_version)
         self._sig.scanned.connect(self._on_scanned)
         self._sig.failed.connect(lambda msg: self._on_log(f"异常：{msg}"))
         self._sig.finished.connect(self._on_job_finished)
@@ -135,6 +139,10 @@ class OtaView(QWidget):
 
         self.btn_scan = QPushButton("扫描 BLE 节点")
         self.btn_scan.clicked.connect(self.start_scan)
+        self.btn_read_ver = QPushButton("读取版本")
+        self.btn_read_ver.setToolTip("扫描并连上此刻空闲广播的节点，读回它们正在运行的固件版本；"
+                                     "被网关连着的节点不广播，读不到")
+        self.btn_read_ver.clicked.connect(self.start_read_versions)
         self.btn_all_emg = QPushButton("全选 EMG")
         self.btn_all_emg.clicked.connect(lambda: self._check_by_kind("semg"))
         self.btn_all_imu = QPushButton("全选 IMU")
@@ -142,7 +150,7 @@ class OtaView(QWidget):
         self.btn_none = QPushButton("清空选择")
         self.btn_none.clicked.connect(lambda: self._set_all_checked(False))
         sel = QHBoxLayout()
-        for b in (self.btn_scan, self.btn_all_emg, self.btn_all_imu, self.btn_none):
+        for b in (self.btn_scan, self.btn_read_ver, self.btn_all_emg, self.btn_all_imu, self.btn_none):
             sel.addWidget(b)
         box_dev = QGroupBox("升级对象")
         dv = QVBoxLayout(box_dev)
@@ -361,11 +369,13 @@ class OtaView(QWidget):
             if row.receiver:
                 kind += " · 接收中"
             cells = [kind, row.label or "—", row.address or "未知",
-                     self._firmware_text(row), row.state]
+                     row.version or "—", self._firmware_text(row), row.state]
             for c, text in enumerate(cells, start=1):
                 item = QTableWidgetItem(text)
                 item.setToolTip(text)
-                if c == 4:
+                if c == 4 and not row.version:
+                    item.setForeground(DIM)
+                if c == 5:
                     item.setForeground(GOOD if Path(self.firmware_for(row)).is_file() else BAD
                                        if self.firmware_for(row) else WARN)
                 self.tbl.setItem(i, c, item)
@@ -488,6 +498,25 @@ class OtaView(QWidget):
 
         self._spawn(job)
 
+    def start_read_versions(self) -> None:
+        opts = self.options()
+        nodes = [row.node() for row in self.rows.values()
+                 if row.address and row.kind and not row.receiver]
+
+        def job(rep: ota.OtaReporter) -> None:
+            self._sig.log.emit(f"扫描 BLE（{opts.scan_timeout:.0f}s）并读取各节点当前固件版本…")
+            advs = ota.scan_adverts(opts.scan_timeout)
+            self._sig.scanned.emit(advs)
+            by_suffix = {n.suffix: n for n in nodes}
+            for adv in advs:
+                n = ota.node_from_advert(adv)
+                if n is not None and n.suffix and n.suffix not in by_suffix:
+                    n.uid = n.suffix
+                    by_suffix[n.suffix] = n
+            ota.read_versions(list(by_suffix.values()), advs, opts, rep)
+
+        self._spawn(job)
+
     def start_upgrade(self) -> None:
         rows = self._checked_rows()
         if not rows:
@@ -566,7 +595,7 @@ class OtaView(QWidget):
             self._purge_sim_rows()
 
     def _set_enabled(self, enabled: bool) -> None:
-        for w in (self.btn_scan, self.btn_start, self.tbl, self.ed_emg, self.ed_imu,
+        for w in (self.btn_scan, self.btn_read_ver, self.btn_start, self.tbl, self.ed_emg, self.ed_imu,
                   self.btn_emg, self.btn_imu, self.btn_row_fw, self.btn_all_emg, self.btn_all_imu,
                   self.btn_none, self.ed_prefix, self.sp_scan, self.sp_wait, self.sp_reboot, self.sp_ack):
             w.setEnabled(enabled)
@@ -595,14 +624,36 @@ class OtaView(QWidget):
         row.state = text
         self._state_cell(row)
 
+    def _on_version(self, key: str, ver: str) -> None:
+        row = self.rows.get(key)
+        if row is None:
+            return
+        row.version = ver
+        self._version_cell(row)
+
+    def _version_cell(self, row: OtaRow) -> None:
+        i = self._index.get(row.suffix)
+        if i is None:
+            return
+        item = self.tbl.item(i, 4)
+        if item is None:
+            item = QTableWidgetItem()
+            self.tbl.setItem(i, 4, item)
+        item.setText(row.version or "—")
+        item.setToolTip(row.version or "未知：节点空闲广播时点\"读取版本\"，或升级时自动读回")
+        if row.version:
+            item.setData(Qt.ForegroundRole, None)   # 清掉"未知"时染的灰色
+        else:
+            item.setForeground(DIM)
+
     def _state_cell(self, row: OtaRow) -> None:
         i = self._index.get(row.suffix)
         if i is None:
             return
-        item = self.tbl.item(i, 5)
+        item = self.tbl.item(i, 6)
         if item is None:
             item = QTableWidgetItem()
-            self.tbl.setItem(i, 5, item)
+            self.tbl.setItem(i, 6, item)
         item.setText(row.state)
         color = GOOD if row.state.startswith("完成") else BAD if row.state.startswith("失败") else \
             WARN if row.state != "空闲" else DIM

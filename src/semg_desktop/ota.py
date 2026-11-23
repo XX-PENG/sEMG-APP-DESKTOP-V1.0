@@ -348,6 +348,7 @@ class OtaReporter:
     on_log: Callable[[str], None] = lambda msg: None
     on_progress: Callable[[int, int], None] = lambda done, total: None
     on_state: Callable[[str, str], None] = lambda key, text: None
+    on_version: Callable[[str, str], None] = lambda key, ver: None
     cancel: threading.Event = field(default_factory=threading.Event)
 
     def log(self, msg: str) -> None:
@@ -358,6 +359,9 @@ class OtaReporter:
 
     def state(self, key: str, text: str) -> None:
         self.on_state(key, text)
+
+    def version(self, key: str, ver: str) -> None:
+        self.on_version(key, ver)
 
     def check(self) -> None:
         if self.cancel.is_set():
@@ -498,6 +502,23 @@ def scan_summary(node: OtaNode, advs: list[Advert], prefix: str) -> str:
 # ── 阶段 1：触发进接收固件 ───────────────────────────────────────────────────
 
 
+async def _read_version(client, node: OtaNode, rep: OtaReporter) -> str | None:
+    """在已连接的应用固件上读 0xFFF2，读到就上报。旧固件没这个特征、或读失败都安静跳过。"""
+    try:
+        chars = {c.uuid.lower() for svc in client.services for c in svc.characteristics}
+        if VERSION_CHAR not in chars:
+            return None
+        raw = bytes(await client.read_gatt_char(VERSION_CHAR))
+    except Exception:  # 读版本只是顺带的增强，bleak 的任何意外都不能挡住触发/升级主流程
+        return None
+    got = parse_version_payload(raw)
+    if got is None:
+        return None
+    rep.version(node.key, got[0])
+    rep.log(f"当前固件版本：{node.identity} → {got[0]}")
+    return got[0]
+
+
 async def _phase1_trigger(node: OtaNode, opts: OtaOptions, rep: OtaReporter) -> bool:
     """返回是否真的发了触发字（节点已在 OTA 模式时不必再发）。
 
@@ -519,6 +540,7 @@ async def _phase1_trigger(node: OtaNode, opts: OtaOptions, rep: OtaReporter) -> 
             rep.log(f"阶段1 连接应用固件 {target.name} [{target.address}] "
                     f"（扫描用时 {time.monotonic() - start:.1f}s）")
             async with client_cls(target.address, timeout=opts.connect_timeout) as client:
+                await _read_version(client, node, rep)
                 # 无响应写：设备收到后立即 esp_restart()，带响应的写在 WinRT 上会挂到超时
                 await client.write_gatt_char(TRIGGER_CHAR, TRIGGER_MAGIC, response=False)
             rep.log(f"阶段1 已触发，等节点重启进接收固件（先等 {opts.reboot_wait:.1f}s，之后边扫边等）")
@@ -739,6 +761,7 @@ async def _verify_app(node: OtaNode, fw: bytes, opts: OtaOptions, rep: OtaReport
         rep.log(f"校验跳过：版本特征长度异常（{len(raw)} B，期望 ≥64）")
         return
     version, sha = got
+    rep.version(node.key, version)   # 回滚时这里报的是设备实际在跑的旧版本，界面照实显示
     if expected is None:
         rep.log(f"校验跳过：固件里读不到镜像描述符；设备当前 version={version}")
         return
@@ -796,3 +819,39 @@ def upgrade_nodes(jobs: Sequence[tuple[OtaNode, bytes]], opts: OtaOptions,
             rep.log(f"完成：{node.identity} 已重启进新固件，整机 {time.monotonic() - t0:.1f}s")
             results.append((node, ""))
     return results
+
+
+async def _read_versions(nodes: Sequence[OtaNode], advs: Sequence[Advert], opts: OtaOptions,
+                         rep: OtaReporter) -> None:
+    client_cls, _ = _bleak()
+    ok = 0
+    for node in nodes:
+        rep.check()
+        target = match_app(advs, node, opts.receiver_prefix)
+        if target is None:
+            rep.log(f"读版本跳过：{node.identity} 此刻不在广播（多半正被网关连着）")
+            continue
+        try:
+            async with client_cls(target.address, timeout=opts.connect_timeout) as client:
+                ver = await _read_version(client, node, rep)
+                if ver is None:
+                    # Windows 可能还端着接收固件那张旧 GATT 表：强刷一次，断开重连再读
+                    await _refresh_gatt_cache(client)
+            if ver is None:
+                async with client_cls(target.address, timeout=opts.connect_timeout) as client:
+                    ver = await _read_version(client, node, rep)
+            if ver is None:
+                rep.log(f"读版本跳过：{node.identity} 未暴露版本特征 0xFFF2（旧固件）")
+            else:
+                ok += 1
+        except OtaCancelled:
+            raise
+        except Exception as exc:  # 一台读失败不影响其余节点
+            rep.log(f"读版本失败：{node.identity} — {type(exc).__name__}: {exc}")
+    rep.log(f"读版本结束：{ok}/{len(nodes)} 台读到当前版本")
+
+
+def read_versions(nodes: Sequence[OtaNode], advs: Sequence[Advert], opts: OtaOptions,
+                  rep: OtaReporter) -> None:
+    """按一轮扫描结果逐台读应用固件正在运行的版本（0xFFF2）。阻塞，必须放工作线程里调。"""
+    asyncio.run(_read_versions(nodes, advs, opts, rep))

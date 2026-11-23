@@ -267,6 +267,7 @@ def test_verify_app_passes_when_fingerprint_matches(monkeypatch):
     log: list[str] = []
     asyncio.run(ota._verify_app(_verify_node(), fw, _verify_opts(), _quiet_reporter(log)))
     assert any("校验通过" in m for m in log)
+    assert any(m.startswith("version:") and m.endswith(":v9") for m in log)
 
 
 def test_verify_app_fails_when_device_kept_the_old_image(monkeypatch):
@@ -274,8 +275,11 @@ def test_verify_app_fails_when_device_kept_the_old_image(monkeypatch):
     fw = _fw_with_desc("v9", bytes(range(32)))
     old = b"v8".ljust(32, b"\x00") + bytes(32)
     _patch_app_scan(monkeypatch, FakeApp("DC:B4:D9:34:2B:FA", old))
+    log: list[str] = []
     with pytest.raises(ota.OtaError, match="拒收或回滚"):
-        asyncio.run(ota._verify_app(_verify_node(), fw, _verify_opts(), _quiet_reporter([])))
+        asyncio.run(ota._verify_app(_verify_node(), fw, _verify_opts(), _quiet_reporter(log)))
+    # 回滚也要把设备实际在跑的旧版本报给界面
+    assert any(m.startswith("version:") and m.endswith(":v8") for m in log)
 
 
 def test_verify_app_degrades_gracefully_on_old_firmware(monkeypatch):
@@ -414,18 +418,22 @@ def test_options_from_config():
 
 
 class _TriggerClient:
-    """只用来记录触发字写了什么，不碰蓝牙。"""
+    """只用来记录触发字写了什么，不碰蓝牙。顺带暴露版本特征供阶段1 读当前版本。"""
 
     writes: list[tuple[str, bytes, object]] = []
 
     def __init__(self, address, timeout=30.0):
         self.address = address
+        self.services = [_Svc([ota.VERSION_CHAR])]
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, *exc):
         return None
+
+    async def read_gatt_char(self, char):
+        return b"1.0.0".ljust(32, b"\x00") + bytes(32)
 
     async def write_gatt_char(self, char, data, response=None):
         _TriggerClient.writes.append((char, bytes(data), response))
@@ -452,10 +460,13 @@ def test_phase1_polls_until_the_node_goes_free(monkeypatch):
     node = ota.OtaNode(kind="imu", suffix="34:2B:FA", address="AA:BB:CC:34:2B:FA")
     opts = ota.OtaOptions(trigger_wait=5.0, reboot_wait=0.0, scan_timeout=0.01)
 
-    sent = asyncio.run(ota._phase1_trigger(node, opts, _quiet_reporter([])))
+    log: list[str] = []
+    sent = asyncio.run(ota._phase1_trigger(node, opts, _quiet_reporter(log)))
     assert sent is True
     assert len(calls) == 3
     assert _TriggerClient.writes == [(ota.TRIGGER_CHAR, ota.TRIGGER_MAGIC, False)]
+    # 触发用的同一条连接顺手读回了升级前的当前版本
+    assert any(m.startswith("version:") and m.endswith(":1.0.0") for m in log)
 
 
 def test_phase1_skips_trigger_when_receiver_is_already_up(monkeypatch):
@@ -715,7 +726,8 @@ class AppLikeReceiver(FakeReceiver):
 
 def _quiet_reporter(log):
     return ota.OtaReporter(on_log=log.append, on_progress=lambda d, t: None,
-                           on_state=lambda k, t: log.append(f"state:{k}:{t}"))
+                           on_state=lambda k, t: log.append(f"state:{k}:{t}"),
+                           on_version=lambda k, v: log.append(f"version:{k}:{v}"))
 
 
 async def _drive_send(fw: bytes, mtu: int = 517):
@@ -814,6 +826,70 @@ def test_upgrade_nodes_end_to_end(monkeypatch):
     assert clients[1].firmware() == fw
 
 
+# ── 批量读当前版本（不碰蓝牙） ───────────────────────────────────────────────
+
+
+def test_read_versions_reports_advertising_nodes_and_skips_the_rest(monkeypatch):
+    advs = [ota.Advert(name="IMU-AABBCC342BFA", address="AA:BB:CC:34:2B:FA")]
+    payload = b"2.0.1".ljust(32, b"\x00") + bytes(32)
+    made = []
+
+    def factory(address, timeout=30.0):
+        client = FakeApp(address, payload)
+        made.append(client)
+        return client
+
+    monkeypatch.setattr(ota, "_bleak", lambda: (factory, object()))
+    nodes = [ota.OtaNode(kind="imu", suffix="34:2B:FA", address="AA:BB:CC:34:2B:FA", uid="34:2B:FA"),
+             ota.OtaNode(kind="semg", suffix="A4:CF:01", address="AA:BB:CC:A4:CF:01", uid="A4:CF:01")]
+    log: list[str] = []
+    ota.read_versions(nodes, advs, ota.OtaOptions(connect_timeout=0.1), _quiet_reporter(log))
+    assert "version:34:2B:FA:2.0.1" in log
+    assert any("不在广播" in m for m in log)      # 被网关连着的那台只跳过，不报错
+    assert any("1/2 台读到" in m for m in log)
+    assert len(made) == 1
+
+
+def test_read_versions_skips_old_firmware_without_version_char(monkeypatch):
+    advs = [ota.Advert(name="IMU-AABBCC342BFA", address="AA:BB:CC:34:2B:FA")]
+    monkeypatch.setattr(ota, "_bleak",
+                        lambda: (lambda a, timeout=30.0: FakeApp(a, has_char=False), object()))
+    node = ota.OtaNode(kind="imu", suffix="34:2B:FA", address="AA:BB:CC:34:2B:FA", uid="34:2B:FA")
+    log: list[str] = []
+    ota.read_versions([node], advs, ota.OtaOptions(), _quiet_reporter(log))
+    assert any("0xFFF2" in m for m in log)
+    assert not any(m.startswith("version:") for m in log)
+
+
+def test_read_versions_keeps_going_after_a_ble_error(monkeypatch):
+    advs = [ota.Advert(name="IMU-AABBCC342BFA", address="AA:BB:CC:34:2B:FA"),
+            ota.Advert(name="EMG-AABBCCA4CF01", address="AA:BB:CC:A4:CF:01")]
+
+    class BoomThenApp:
+        def __init__(self, address, timeout=30.0):
+            self.address = address
+            self.services = [_Svc([ota.VERSION_CHAR])]
+
+        async def __aenter__(self):
+            if self.address.endswith("34:2B:FA"):
+                raise ConnectionResetError("链路断了")
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def read_gatt_char(self, char):
+            return b"1.0.1".ljust(32, b"\x00") + bytes(32)
+
+    monkeypatch.setattr(ota, "_bleak", lambda: (BoomThenApp, object()))
+    nodes = [ota.OtaNode(kind="imu", suffix="34:2B:FA", address="AA:BB:CC:34:2B:FA", uid="34:2B:FA"),
+             ota.OtaNode(kind="semg", suffix="A4:CF:01", address="AA:BB:CC:A4:CF:01", uid="A4:CF:01")]
+    log: list[str] = []
+    ota.read_versions(nodes, advs, ota.OtaOptions(), _quiet_reporter(log))
+    assert any("读版本失败" in m and "链路断了" in m for m in log)
+    assert "version:A4:CF:01:1.0.1" in log
+
+
 # ── 界面 ─────────────────────────────────────────────────────────────────────
 
 
@@ -897,6 +973,7 @@ def test_ota_view_threaded_scan_and_upgrade(qapp, cfg, tmp_path, monkeypatch):
         node = jobs[0][0]
         rep.state(node.key, "传输中")
         rep.progress(1024, 2048)
+        rep.version(node.key, "1.0.1")
         rep.state(node.key, "完成")
         return [(node, "")]
 
@@ -915,7 +992,9 @@ def test_ota_view_threaded_scan_and_upgrade(qapp, cfg, tmp_path, monkeypatch):
     view.start_upgrade()
     _drain(qapp, view)
     assert view.rows["A4:CF:01"].state == "完成"
-    assert view.tbl.item(view._index["A4:CF:01"], 5).text() == "完成"
+    assert view.tbl.item(view._index["A4:CF:01"], 6).text() == "完成"
+    assert view.rows["A4:CF:01"].version == "1.0.1"
+    assert view.tbl.item(view._index["A4:CF:01"], 4).text() == "1.0.1"
     assert view.bar.value() == 50  # 1024/2048
     view.close()
     _KEEP.append(view)
@@ -931,6 +1010,33 @@ def _drain(qapp, view, timeout: float = 5.0) -> None:
             return
         time.sleep(0.01)
     raise AssertionError("后台任务没在超时内结束")
+
+
+def test_ota_view_read_versions_button(qapp, cfg, monkeypatch):
+    """读取版本按钮：扫描结果归并进表，读回的版本落到"当前版本"列。"""
+    from semg_desktop.ui.ota_view import OtaView
+
+    view = OtaView(cfg)
+    view.set_devices([{"kind": "semg", "mac": "AA:BB:CC:A4:CF:01",
+                       "full_mac": "AA:BB:CC:A4:CF:01", "label": "CH1"}])
+    assert view.tbl.item(view._index["A4:CF:01"], 4).text() == "—"
+    monkeypatch.setattr(ota, "scan_adverts",
+                        lambda timeout=8.0: [ota.Advert(name="EMG-AABBCCA4CF01",
+                                                         address="AA:BB:CC:A4:CF:01")])
+
+    def fake_read(nodes, advs, opts, rep):
+        assert [n.key for n in nodes] == ["A4:CF:01"]
+        for n in nodes:
+            rep.version(n.key, "1.0.1")
+
+    monkeypatch.setattr(ota, "read_versions", fake_read)
+    view.start_read_versions()
+    _drain(qapp, view)
+    assert view.rows["A4:CF:01"].version == "1.0.1"
+    assert view.tbl.item(view._index["A4:CF:01"], 4).text() == "1.0.1"
+    assert view.tbl.isEnabled()
+    view.close()
+    _KEEP.append(view)
 
 
 def test_ota_view_keeps_selection_across_rebuild(qapp, cfg):
