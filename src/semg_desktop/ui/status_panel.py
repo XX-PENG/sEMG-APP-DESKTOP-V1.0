@@ -23,11 +23,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import theme as T
+
 DEVICE_COLUMNS = ["通道", "MAC", "类型", "槽位", "状态", "帧", "样本", "实测速率", "最后seq",
                   "drop", "丢帧缺口", "节点重启", "重锚", "缓冲样本", "距今ms"]
-BAD = QColor(255, 120, 120)
-WARN = QColor(255, 200, 110)
-GOOD = QColor(150, 220, 150)
+BAD = T.color("danger")
+WARN = T.color("warn")
+GOOD = T.color("safe")
 
 
 class StatusPanel(QWidget):
@@ -122,8 +124,8 @@ class StatusPanel(QWidget):
         self.bar.setValue(int(min(200, st.utilization * 100)))
         self.bar.setFormat(f"{st.utilization * 100:.0f}%")
         self.bar.setStyleSheet(
-            "QProgressBar::chunk{background:%s}" % ("#e05a5a" if st.utilization > 0.85 else
-                                                   "#e0b05a" if st.utilization > 0.6 else "#5aa060")
+            "QProgressBar::chunk{background:%s}" % (T.C["danger"] if st.utilization > 0.85 else
+                                                   T.C["warn"] if st.utilization > 0.6 else T.C["safe"])
         )
         self.lbl_lines.setText(f"{st.lines_per_second:,.0f} 行/s，{st.frames_per_second:,.0f} 帧/s")
         self.lbl_frames.setText(f"{st.bytes_total:,} B，回放进度 " + (
@@ -134,7 +136,7 @@ class StatusPanel(QWidget):
             lab.setText(f"{value:,}")
             bad = attr in ("imu_block_truncated", "imu_out_of_range", "semg_short", "semg_overflow_cnt",
                            "bad_token_lines", "garbage_lines", "oversize_lines")
-            lab.setStyleSheet("color:%s" % ("#e05a5a" if bad and value else "#d0d0d0"))
+            lab.setStyleSheet("color:%s" % (T.C["danger"] if bad and value else T.C["text"]))
 
         self._fill_table(rows)
         self.lbl_advice.setText(self._advice(st, rows))

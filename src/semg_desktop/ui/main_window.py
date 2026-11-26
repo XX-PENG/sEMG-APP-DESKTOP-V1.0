@@ -1,8 +1,7 @@
 """主窗口：腘绳肌损伤预防监护台的外壳与课次生命周期。
 
-采集 / 协议 / 时标 / 录制 / OTA 全部沿用原有管线，这里只负责把领域引擎的快照分发到七个
-业务视图，并管理"选运动员 → 选课目 → 开始课次 → 实时反馈 → 处置事件 → 结束出报告"这条
-主流程。导航固定不随内容滚动，顶栏的运动员 / 课目 / 课次 / 录制 / 风险 / 静音始终可达。
+主流程保持"选运动员 → 选课目 → 开始课次 → 实时反馈 → 结束出报告"，工程诊断与固件操作
+收进独立工具页，不打断场边使用。
 """
 
 from __future__ import annotations
@@ -25,6 +24,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QStackedWidget,
+    QStyle,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -45,6 +46,7 @@ from .events_view import EventsView
 from .fatigue_view import FatigueView
 from .live_view import LiveView
 from .muscle_view import MuscleView
+from .ota_view import OtaView
 from .report_view import ReportView
 from .roster_view import RosterView
 from .widgets import LevelPill, ShellBackground
@@ -52,13 +54,13 @@ from .widgets import LevelPill, ShellBackground
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 NAV = [
-    ("live", "实时守护"),
+    ("live", "实时监测"),
     ("muscle", "肌肉与步态"),
     ("fatigue", "疲劳与负荷"),
     ("events", "风险事件"),
     ("report", "会话报告"),
-    ("roster", "运动员档案"),
-    ("devices", "设备与固件"),
+    ("roster", "运动员"),
+    ("devices", "传感器布置"),
 ]
 
 
@@ -107,8 +109,10 @@ class MainWindow(QMainWindow):
         self._last_event_count = 0
         self._snap = None
 
-        self.setWindowTitle("HAMSTRING GUARD · 曲棍球腘绳肌损伤预防监护台")
+        self.setWindowTitle("HAMSTRING GUARD · 腘绳肌损伤预防")
+        self.setWindowIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
         self.resize(1560, 900)
+        self.setMinimumSize(1100, 700)
 
         shell = ShellBackground()
         root = QHBoxLayout(shell)
@@ -136,12 +140,18 @@ class MainWindow(QMainWindow):
                           ("events", self.events), ("report", self.report),
                           ("roster", self.roster_view), ("devices", self.devices)):
             self.tabs.addWidget(view)
-        # 工程视图与 OTA 的真实归属在设备页内，保留引用供刷新与测试
+        self.engineering = QTabWidget()
+        self.engineering.setObjectName("EngineeringTabs")
+        self.engineering.addTab(self.devices.status, "链路与解析")
+        self.engineering.addTab(self.devices.debug, "原始信号与统计")
+        self.ota = OtaView(self.cfg)
+        self.engineering.addTab(self.ota, "固件升级")
+        self.tabs.addWidget(self.engineering)
+        # 保留原有引用，工程页继续使用同一套刷新路由与测试契约。
         self.emg = self.devices.emg
         self.imu = self.devices.imu
         self.analysis = self.devices.analysis
         self.status = self.devices.status
-        self.ota = self.devices.ota
 
         self.events.set_engine(self.engine)
         self.roster_view.selection_changed.connect(self.switch_athlete)
@@ -175,22 +185,22 @@ class MainWindow(QMainWindow):
     def _build_rail(self) -> QWidget:
         rail = QWidget()
         rail.setObjectName("NavRail")
-        rail.setFixedWidth(206)
+        rail.setFixedWidth(188)
         lay = QVBoxLayout(rail)
-        lay.setContentsMargins(14, 16, 14, 14)
-        lay.setSpacing(4)
+        lay.setContentsMargins(12, 16, 12, 14)
+        lay.setSpacing(3)
         head = QHBoxLayout()
         head.addWidget(LogoMark())
-        title = QLabel("HAMSTRING\nGUARD")
-        title.setStyleSheet(f"color:{T.C['text_warm']}; font-weight:800; font-size:15px;"
-                            f"letter-spacing:2px; background:transparent;")
+        title = QLabel("腘绳肌\n损伤预防")
+        title.setStyleSheet(f"color:{T.C['text_warm']}; font-weight:700; font-size:14px;"
+                            f"background:transparent;")
         head.addWidget(title)
         head.addStretch(1)
         lay.addLayout(head)
-        sub = QLabel("曲棍球 · 腘绳肌损伤预防")
+        sub = QLabel("场边监测工作台")
         sub.setObjectName("Dim")
         lay.addWidget(sub)
-        lay.addSpacing(14)
+        lay.addSpacing(16)
         self._nav_buttons: dict[str, QPushButton] = {}
         for key, label in NAV:
             b = QPushButton(label)
@@ -200,6 +210,18 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _c=False, k=key: self._select_nav(k))
             self._nav_buttons[key] = b
             lay.addWidget(b)
+        lay.addSpacing(10)
+        self._nav_buttons["engineering"] = QPushButton("工程调试")
+        self._nav_buttons["engineering"].setObjectName("NavButton")
+        self._nav_buttons["engineering"].setProperty("active", "false")
+        self._nav_buttons["engineering"].setCursor(Qt.PointingHandCursor)
+        self._nav_buttons["engineering"].clicked.connect(
+            lambda: self._select_nav("engineering"))
+        lay.addWidget(self._nav_buttons["engineering"])
+        self._eng_shortcut = QAction("工程调试", self)
+        self._eng_shortcut.setShortcut("Ctrl+Shift+D")
+        self._eng_shortcut.triggered.connect(lambda: self._select_nav("engineering"))
+        self.addAction(self._eng_shortcut)
         lay.addStretch(1)
         self.lbl_link = QLabel("链路未连接")
         self.lbl_link.setObjectName("Dim")
@@ -210,56 +232,64 @@ class MainWindow(QMainWindow):
     def _build_topbar(self) -> QWidget:
         bar = QWidget()
         bar.setObjectName("TopBar")
-        bar.setFixedHeight(66)
+        bar.setFixedHeight(64)
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(16, 10, 16, 10)
-        lay.setSpacing(10)
+        lay.setContentsMargins(18, 10, 18, 10)
+        lay.setSpacing(8)
 
-        lay.addWidget(QLabel("运动员"))
         self.cb_athlete = QComboBox()
-        self.cb_athlete.setMinimumWidth(150)
+        self.cb_athlete.setMinimumWidth(124)
+        self.cb_athlete.setToolTip("选择运动员")
         self._fill_athletes()
         self.cb_athlete.currentIndexChanged.connect(self._athlete_combo)
         lay.addWidget(self.cb_athlete)
-        lay.addWidget(QLabel("课目"))
         self.cb_drill = QComboBox()
         for d in DRILLS:
             self.cb_drill.addItem(d.name, d.id)
         self.cb_drill.setCurrentIndex(1)
+        self.cb_drill.setMinimumWidth(112)
+        self.cb_drill.setToolTip("选择本次课目")
         self.cb_drill.currentIndexChanged.connect(self._drill_combo)
         lay.addWidget(self.cb_drill)
 
         self.btn_session = QPushButton("开始课次")
         self.btn_session.setObjectName("Primary")
+        self.btn_session.setMinimumWidth(104)
+        self.btn_session.setShortcut("Ctrl+Return")
+        self.btn_session.setToolTip("开始或结束本次课次（Ctrl+Enter）")
         self.btn_session.clicked.connect(self.toggle_session)
         lay.addWidget(self.btn_session)
         self.lbl_clock = QLabel("00:00")
-        self.lbl_clock.setStyleSheet(f"font-family:'{T.MONO_FAMILY}'; font-size:20px;"
-                                     f"font-weight:700; color:{T.C['text_warm']}; background:transparent;")
-        self.lbl_clock.setFixedWidth(64)
+        self.lbl_clock.setStyleSheet(f"font-family:'{T.MONO_FAMILY}'; font-size:18px;"
+                                     f"font-weight:600; color:{T.C['text_warm']}; background:transparent;")
+        self.lbl_clock.setFixedWidth(58)
         lay.addWidget(self.lbl_clock)
         self.btn_record = QPushButton("录制")
+        self.btn_record.setObjectName("Ghost")
+        self.btn_record.setToolTip("需要留存原始数据时再开启录制")
         self.btn_record.clicked.connect(self.toggle_recording)
         lay.addWidget(self.btn_record)
 
         lay.addStretch(1)
         self.pill_risk = LevelPill("风险 —", "muted")
         lay.addWidget(self.pill_risk)
-        self.btn_mute = QPushButton("提示音 开")
+        self.lbl_source = QLabel("未连接")
+        self.lbl_source.setObjectName("SourceOffline")
+        self.lbl_source.setMaximumWidth(190)
+        lay.addWidget(self.lbl_source)
+        self.btn_mute = QPushButton("提示音")
         self.btn_mute.setObjectName("Chip")
         self.btn_mute.setCheckable(True)
         self.btn_mute.setChecked(False)
+        self.btn_mute.setToolTip("开启或关闭场边提示音")
         self.btn_mute.clicked.connect(self._toggle_mute)
         lay.addWidget(self.btn_mute)
-        self.btn_connect = QPushButton("连接…")
+        self.btn_connect = QPushButton("连接")
         self.btn_connect.setObjectName("Ghost")
         self.btn_connect.setShortcut("Ctrl+K")
+        self.btn_connect.setToolTip("选择 USB、TCP、回放或模拟数据源（Ctrl+K）")
         self.btn_connect.clicked.connect(self.open_connect)
         lay.addWidget(self.btn_connect)
-        self.btn_disconnect = QPushButton("断开")
-        self.btn_disconnect.setObjectName("Ghost")
-        self.btn_disconnect.clicked.connect(self.disconnect_source)
-        lay.addWidget(self.btn_disconnect)
         return bar
 
     def _fill_athletes(self) -> None:
@@ -274,7 +304,8 @@ class MainWindow(QMainWindow):
         self.cb_athlete.blockSignals(False)
 
     def _select_nav(self, key: str) -> None:
-        index = next(i for i, (k, _l) in enumerate(NAV) if k == key)
+        index = (next(i for i, (k, _l) in enumerate(NAV) if k == key)
+                 if key in {k for k, _l in NAV} else len(NAV))
         self.tabs.setCurrentIndex(index)
         for k, b in self._nav_buttons.items():
             b.setProperty("active", "true" if k == key else "false")
@@ -282,6 +313,8 @@ class MainWindow(QMainWindow):
             b.style().polish(b)
         if key == "events":
             self.events.refresh()
+        elif key == "engineering":
+            self.engineering.setCurrentWidget(self.engineering.widget(0))
 
     # ── 上下文切换 ──────────────────────────────────────────────────────────
 
@@ -370,7 +403,7 @@ class MainWindow(QMainWindow):
     def _sync_mute_button(self) -> None:
         self.btn_mute.blockSignals(True)
         self.btn_mute.setChecked(not self.th.sound)
-        self.btn_mute.setText("提示音 关" if not self.th.sound else "提示音 开")
+        self.btn_mute.setText("静音" if not self.th.sound else "提示音")
         self.btn_mute.blockSignals(False)
 
     # ── 连接 ────────────────────────────────────────────────────────────────
@@ -424,16 +457,37 @@ class MainWindow(QMainWindow):
         self.acq = acq
         self.ota.set_simulated(isinstance(source, SimulateSource))
         self.analysis.acq = acq
-        self.btn_disconnect.setEnabled(True)
+        self.btn_connect.setText("更换连接")
         if self.engine:
             self.engine.reset_metrics()
             self.engine.session_start = acq.now()
         self.live.set_context(self.profile, self.drill)
         self._last_error = None
-        self.lbl_link.setText(source.describe())
+        self.lbl_link.setText(self._source_label(source))
+        self.lbl_link.setToolTip(source.describe())
         self.lbl_status.setText(source.describe())
+        self.lbl_source.setText(self._source_label(source))
+        self.lbl_source.setToolTip(source.describe())
+        self.lbl_source.setObjectName("SourceWarning" if isinstance(source, (SimulateSource, AthleteSimSource))
+                                      else "SourceHealthy")
+        self.lbl_source.style().unpolish(self.lbl_source)
+        self.lbl_source.style().polish(self.lbl_source)
         if isinstance(source, AthleteSimSource):
             source.fatigue_rate = self.th.fatigue_rate
+
+    @staticmethod
+    def _source_label(source) -> str:
+        if source.name == "athlete":
+            return "运动员模拟"
+        if source.name == "simulate":
+            return "信号模拟"
+        if source.name == "replay":
+            return "记录回放"
+        if source.name == "serial":
+            return f"USB · {source.port}"
+        if source.name == "tcp":
+            return f"网络 · {source.host}"
+        return source.describe()
 
     def disconnect_source(self) -> None:
         if self.acq is None:
@@ -452,9 +506,14 @@ class MainWindow(QMainWindow):
         self.acq = None
         self.ota.set_simulated(False)
         self.analysis.acq = None
-        self.btn_disconnect.setEnabled(False)
+        self.btn_connect.setText("连接")
         self.lbl_link.setText("链路未连接")
         self.lbl_status.setText("已断开")
+        self.lbl_source.setText("未连接")
+        self.lbl_source.setToolTip("")
+        self.lbl_source.setObjectName("SourceOffline")
+        self.lbl_source.style().unpolish(self.lbl_source)
+        self.lbl_source.style().polish(self.lbl_source)
 
     # ── 课次 ────────────────────────────────────────────────────────────────
 
@@ -596,19 +655,22 @@ class MainWindow(QMainWindow):
             self.fatigue.update_data(self.engine, snap, t_now - self.session_start_device)
         elif current is self.devices:
             self.devices.update_data(st, self.acq.device_rows(), self.acq.status_log(), snap)
-            inner = self.devices.inner.currentWidget()
-            if inner is self.devices.debug:      # 工程调试是嵌套子标签，解包到具体视图
+        elif current is self.engineering:
+            inner = self.engineering.currentWidget()
+            if inner is self.status:
+                self.status.update_data(st, self.acq.device_rows(), self.acq.status_log())
+            elif inner is self.devices.debug:
                 inner = inner.currentWidget()
-            if inner is self.emg:
-                self.emg.update_data(self.acq.emg_windows(self.emg.span),
-                                     self.acq.env_windows(self.emg.span), t_now)
-            elif inner is self.imu:
-                t, samples = self.acq.imu_window(self.cfg.display_span_seconds)
-                self.imu.update_data(t, samples, t_now)
-                self.imu.set_latest(self.acq.imu_latest())
-                self.imu.set_attitude(self.acq.imu_attitude())
-            elif inner is self.analysis:
-                self.analysis.update_data(t_now)
+                if inner is self.emg:
+                    self.emg.update_data(self.acq.emg_windows(self.emg.span),
+                                         self.acq.env_windows(self.emg.span), t_now)
+                elif inner is self.imu:
+                    t, samples = self.acq.imu_window(self.cfg.display_span_seconds)
+                    self.imu.update_data(t, samples, t_now)
+                    self.imu.set_latest(self.acq.imu_latest())
+                    self.imu.set_attitude(self.acq.imu_attitude())
+                elif inner is self.analysis:
+                    self.analysis.update_data(t_now)
             elif inner is self.ota:
                 self.ota.set_devices(self.acq.device_rows())
 
@@ -635,8 +697,7 @@ class MainWindow(QMainWindow):
         elif st.replay_progress is not None:
             self.lbl_status.setText(f"{st.source}　进度 {st.replay_progress * 100:.1f}%")
         elif not self.rec and not self.session_active:
-            self.lbl_status.setText(f"{st.source}　{st.bytes_per_second:,.0f} B/s　"
-                                    f"{st.frames_per_second:,.0f} 帧/s")
+            self.lbl_status.setText(f"{st.source} · 已就绪")
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self.ota.busy and QMessageBox.question(

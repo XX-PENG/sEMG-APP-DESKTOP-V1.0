@@ -1,7 +1,7 @@
-"""设备与固件页：传感器布置 / 链路健康 / 工程调试 / OTA。
+"""传感器布置页：贴点布置、通道与肌肉映射、设备在线状态。
 
-把工程向的东西收在这一页，业务页不被串口计数和固件进度打扰；但一条都不丢——链路容量、
-解析异常、seq 缺口、OTA 两阶段升级都还在，只是换了位置。
+链路健康、原始信号和固件升级由主窗口的"工程调试"页承载，场边布置页只保留教练需要的
+传感器操作。
 """
 
 from __future__ import annotations
@@ -37,10 +37,9 @@ from .widgets import _leg_paths, card
 from .analysis_view import AnalysisView
 from .emg_view import EmgView
 from .imu_view import ImuView
-from .ota_view import OtaView
 from .status_panel import StatusPanel
 
-MAP_COLS = ["通道", "肌肉", "MAC", "状态", "实测速率", "帧", "丢帧缺口"]
+MAP_COLS = ["通道", "肌肉", "设备 MAC", "状态", "速率", "帧数", "丢帧"]
 
 _TOP_RX, _TOP_RY = 56.0, 42.0     # 大腿横断面设计半径
 # 解剖槽位（横断面设计坐标，前侧朝上；x 以外侧为正，乘 side 系数镜像）：
@@ -500,29 +499,44 @@ class DevicesView(QWidget):
         self.cfg = cfg
         self.th = th
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
-        self.inner = QTabWidget()
-        root.addWidget(self.inner)
-
+        root.setContentsMargins(20, 16, 20, 16)
         place = QWidget()
         pv = QVBoxLayout(place)
-        pv.setContentsMargins(0, 10, 0, 0)
-        pv.setSpacing(10)
+        pv.setContentsMargins(0, 0, 0, 0)
+        pv.setSpacing(12)
+        heading = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        title = QLabel("传感器布置")
+        title.setObjectName("PageTitle")
+        hint = QLabel("按图示贴好传感器，再开始课次")
+        hint.setObjectName("PageHint")
+        title_box.addWidget(title)
+        title_box.addWidget(hint)
+        heading.addLayout(title_box)
+        heading.addStretch(1)
+        online = QLabel("EMG ×8 + 大腿 IMU")
+        online.setObjectName("CardHint")
+        heading.addWidget(online)
+        pv.addLayout(heading)
         hbox = QHBoxLayout()
         hbox.setSpacing(10)
-        f_map, l_map = card("传感器布置", "圆点编号 = 采集通道 · 俯视图拖拽交换")
+        f_map, l_map = card("贴点位置", "拖动圆点可交换两个位置")
         self.sensor_map = SensorMap(th)
         l_map.addWidget(self.sensor_map, 1)
         row_map = QHBoxLayout()
+        instruction = QLabel("多数情况使用默认布置；位置不一致时再拖动交换。")
+        instruction.setObjectName("Dim")
+        row_map.addWidget(instruction)
         row_map.addStretch(1)
-        self.btn_reset_place = QPushButton("复位映射")
+        self.btn_reset_place = QPushButton("恢复默认")
         self.btn_reset_place.setObjectName("Ghost")
         self.btn_reset_place.setToolTip("恢复通道与肌肉贴点的默认对应")
         self.btn_reset_place.clicked.connect(self.sensor_map.reset_mapping)
         row_map.addWidget(self.btn_reset_place)
         l_map.addLayout(row_map)
         hbox.addWidget(f_map, 1)
-        f_side, l_side = card("贴点清单", "EMG ×8 + 大腿 IMU")
+        f_side, l_side = card("通道对应", "在线状态实时更新")
         self.place_labels: dict[str, QLabel] = {}
         for m in MUSCLES:
             lab = QLabel(f"CH{channel_of(m.id) + 1} · {m.full_label}")
@@ -533,16 +547,15 @@ class DevicesView(QWidget):
         self.lbl_imu_place.setStyleSheet(f"color:{T.C['turf']}; background:transparent; font-size:12px;")
         l_side.addWidget(self.lbl_imu_place)
         l_side.addStretch(1)
-        self.lbl_place_hint = QLabel("在俯视图把一个贴点拖到另一肌肉位置即交换两者，波形与判读的数据映射"
-                                     "同步更新；后面观自动投影，不可拖动。IMU 吸附横断面中央空白，"
-                                     "可拖到另一条腿换侧；佩戴侧与矢状面轴也可在实时守护页调整。")
+        self.lbl_place_hint = QLabel("圆点编号对应采集通道。只有实际贴错位置时才拖动交换；IMU 可拖到另一条腿。"
+                                     "完整链路信息和诊断数据位于左侧“工程调试”。")
         self.lbl_place_hint.setObjectName("Dim")
         self.lbl_place_hint.setWordWrap(True)
         l_side.addWidget(self.lbl_place_hint)
         f_side.setFixedWidth(280)
         hbox.addWidget(f_side)
         pv.addLayout(hbox, 7)
-        f_tbl, l_tbl = card("通道映射", "MAC 定位置，重连不串台")
+        f_tbl, l_tbl = card("设备与通道", "离线设备请检查电源或连接")
         self.tbl = QTableWidget(0, len(MAP_COLS))
         self.tbl.setHorizontalHeaderLabels(MAP_COLS)
         self.tbl.verticalHeader().setVisible(False)
@@ -550,13 +563,12 @@ class DevicesView(QWidget):
         self.tbl.horizontalHeader().setStretchLastSection(True)
         self.tbl.setAlternatingRowColors(True)
         self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tbl.setMinimumHeight(140)
         l_tbl.addWidget(self.tbl)
-        pv.addWidget(f_tbl, 4)
-        self.inner.addTab(place, "传感器布置")
+        pv.addWidget(f_tbl, 3)
+        root.addWidget(place)
 
         self.status = StatusPanel(cfg)
-        self.inner.addTab(self.status, "链路与解析")
-
         self.debug = QTabWidget()
         self.emg = EmgView(cfg)
         self.imu = ImuView(cfg)
@@ -564,10 +576,6 @@ class DevicesView(QWidget):
         self.debug.addTab(self.emg, "原始 sEMG ×8")
         self.debug.addTab(self.imu, "IMU 九分量")
         self.debug.addTab(self.analysis, "频谱 / 统计")
-        self.inner.addTab(self.debug, "工程调试")
-
-        self.ota = OtaView(cfg)
-        self.inner.addTab(self.ota, "固件升级 (OTA)")
 
     def update_data(self, st, rows, status_log, snap) -> None:
         self.status.update_data(st, rows, status_log)

@@ -1,16 +1,18 @@
-"""数据源选择对话框。"""
+"""数据源选择对话框：先选连接方式，再填写必要参数。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
-    QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,31 +40,39 @@ class ConnectDialog(QDialog):
     def __init__(self, cfg, parent=None) -> None:
         super().__init__(parent)
         self.cfg = cfg
-        self.setWindowTitle("选择数据源")
-        self.setMinimumWidth(520)
+        self.setWindowTitle("连接设备")
+        self.setMinimumWidth(580)
+        intro = QLabel("选择接收数据的设备。现场训练通常使用 USB 连接；模拟与回放用于演示和复盘。")
+        intro.setObjectName("PageHint")
+        intro.setWordWrap(True)
 
-        self.rb_serial = QRadioButton("USB 串口")
-        self.rb_tcp = QRadioButton("TCP 透传")
-        self.rb_replay = QRadioButton("回放原始日志")
-        self.rb_athlete = QRadioButton("运动员模拟（内置信号 · 步态锁定）")
-        self.rb_athlete.setChecked(True)
+        self.rb_serial = QRadioButton("USB 设备")
+        self.rb_tcp = QRadioButton("网络接收器")
+        self.rb_replay = QRadioButton("历史记录回放")
+        self.rb_athlete = QRadioButton("运动员模拟")
+        self.rb_serial.setChecked(True)
         for rb in (self.rb_serial, self.rb_tcp, self.rb_replay, self.rb_athlete):
             rb.toggled.connect(self._switch)
 
         radios = QVBoxLayout()
-        for rb in (self.rb_athlete, self.rb_serial, self.rb_tcp, self.rb_replay):
+        for rb in (self.rb_serial, self.rb_tcp, self.rb_replay, self.rb_athlete):
             radios.addWidget(rb)
 
         self.ed_port = QLineEdit(cfg.serial.port or "")
+        self.ed_port.setPlaceholderText("例如 COM7")
         self.cb_ports = QPushButton("刷新串口列表")
         self.cb_ports.clicked.connect(self._refresh_ports)
-        self.sp_baud = QSpinBox()
-        self.sp_baud.setRange(1200, 4_000_000)
-        self.sp_baud.setValue(cfg.serial.baudrate)
-        self.sp_baud.setSingleStep(1000)
+        self.cb_baud = QComboBox()
+        for baud in BAUD_CHOICES:
+            self.cb_baud.addItem(f"{baud:,}", baud)
+        index = self.cb_baud.findData(cfg.serial.baudrate)
+        if index < 0:
+            self.cb_baud.addItem(f"{cfg.serial.baudrate:,}", cfg.serial.baudrate)
+            index = self.cb_baud.count() - 1
+        self.cb_baud.setCurrentIndex(index)
         self.lbl_ports = QLabel("")
         self.lbl_ports.setWordWrap(True)
-        self.lbl_ports.setStyleSheet("color:#aaa")
+        self.lbl_ports.setObjectName("Muted")
         serial_panel = QWidget()
         f = QFormLayout(serial_panel)
         row = QHBoxLayout()
@@ -70,7 +80,7 @@ class ConnectDialog(QDialog):
         row.addWidget(self.cb_ports)
         f.addRow("端口", row)
         f.addRow("", self.lbl_ports)
-        f.addRow("波特率", self.sp_baud)
+        f.addRow("波特率", self.cb_baud)
 
         self.ed_host = QLineEdit(cfg.tcp.host)
         self.sp_port = QSpinBox()
@@ -99,9 +109,11 @@ class ConnectDialog(QDialog):
 
         athlete_panel = QWidget()
         f = QFormLayout(athlete_panel)
-        f.addRow("", QLabel("按网关文本协议生成 8 路 sEMG + 大腿 IMU：EMG 爆发与步态相位锁定、\n"
-                            "频谱随疲劳下移、左右不对称按档案推演，无硬件时演示完整判读闭环。\n"
-                            "解析/时标/录制与真实硬件一致。"))
+        note = QLabel("用内置信号演示完整的监测流程，不需要连接硬件。\n"
+                      "设备状态会明确标注为模拟，不会写入真实设备通道。")
+        note.setObjectName("Muted")
+        note.setWordWrap(True)
+        f.addRow(note)
 
         self.stack = QStackedWidget()
         for w in (serial_panel, tcp_panel, replay_panel, athlete_panel):
@@ -111,13 +123,24 @@ class ConnectDialog(QDialog):
         left.addLayout(radios)
         left.addWidget(self.stack, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("连接")
+        buttons.button(QDialogButtonBox.Cancel).setText("取消")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
         root = QVBoxLayout(self)
-        root.addLayout(left)
+        root.setContentsMargins(20, 18, 20, 16)
+        root.setSpacing(14)
+        root.addWidget(intro)
+        content = QFrame()
+        content.setObjectName("Card")
+        content_lay = QVBoxLayout(content)
+        content_lay.setContentsMargins(16, 14, 16, 14)
+        content_lay.addLayout(left)
+        root.addWidget(content)
         root.addWidget(buttons)
         self._switch()
+        self._refresh_ports()
 
     def _switch(self) -> None:
         self.stack.setCurrentIndex(
@@ -150,6 +173,6 @@ class ConnectDialog(QDialog):
                                 pace=not self.chk_nopace.isChecked())
         if self.rb_athlete.isChecked():
             return AthleteSimSource()
-        return SerialSource(self.ed_port.text().strip(), baudrate=self.sp_baud.value(),
+        return SerialSource(self.ed_port.text().strip(), baudrate=self.cb_baud.currentData(),
                            timeout=self.cfg.serial.timeout_seconds)
 

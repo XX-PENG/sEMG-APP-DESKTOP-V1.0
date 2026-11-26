@@ -6,9 +6,13 @@ import pytest
 pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QRadioButton  # noqa: E402
 
-from semg_desktop.sources import AthleteSimSource, SimulateSource  # noqa: E402
+from semg_desktop.sources import (  # noqa: E402
+    AthleteSimSource,
+    SerialSource,
+    SimulateSource,
+)
 from semg_desktop.ui.analysis_view import AnalysisView  # noqa: E402
 from semg_desktop.ui.connect_dialog import ConnectDialog  # noqa: E402
 from semg_desktop.ui.emg_view import EmgView  # noqa: E402
@@ -87,7 +91,8 @@ def test_open_connect_ok_path_actually_connects(qapp, cfg, monkeypatch):
     _KEEP.append(win)
     win.open_connect()
     assert win.acq is not None
-    assert win.btn_disconnect.isEnabled()
+    assert win.btn_connect.text() == "更换连接"
+    assert not win.lbl_source.isHidden()
     win.disconnect_source()
     win.close()
 
@@ -111,7 +116,9 @@ def test_attitude_widget_renders_yaw_and_reset(qapp, cfg):
 def test_connect_dialog_builds_sources(qapp, cfg):
     dlg = ConnectDialog(cfg)
     _KEEP.append(dlg)
-    assert isinstance(dlg.source(), AthleteSimSource)   # 默认运动员模拟
+    assert isinstance(dlg.rb_serial, QRadioButton)
+    assert dlg.rb_serial.isChecked()
+    assert isinstance(dlg.source(), SerialSource)
     dlg.rb_tcp.setChecked(True)
     assert dlg.source().describe().startswith("TCP")
     dlg.rb_serial.setChecked(True)
@@ -134,19 +141,19 @@ def test_main_window_receives_simulated_stream(qapp):
     assert len([r for r in rows if r["kind"] == "semg"]) == 8
     assert st.parse.semg_frames > 0 and st.parse.imu_frames > 0
 
-    for key in ("live", "muscle", "fatigue", "events", "report", "roster", "devices"):
+    for key in ("live", "muscle", "fatigue", "events", "report", "roster", "devices", "engineering"):
         win._select_nav(key)
         win.refresh()
         qapp.processEvents()
     for inner in (win.emg, win.imu, win.analysis, win.status, win.ota):
         if inner in (win.emg, win.imu, win.analysis):
-            win.devices.inner.setCurrentWidget(win.devices.debug)
+            win.engineering.setCurrentWidget(win.devices.debug)
             win.devices.debug.setCurrentWidget(inner)
         else:
-            win.devices.inner.setCurrentWidget(inner)
+            win.engineering.setCurrentWidget(inner)
         win.refresh()
         qapp.processEvents()
-    # 回归：嵌套工程子标签必须真正拿到实时数据（旧路由只认直接子页，原始 sEMG 会空白）
+    # 回归：工程页必须真正拿到实时数据，原始 sEMG 与频谱不能空白。
     assert any(c.xData is not None and len(c.xData) > 0 for c in win.emg._curves)
     assert win.analysis.tbl.item(0, 1).text() != "—"
     win.close()
@@ -157,8 +164,8 @@ def test_ota_sim_rows_cleared_on_disconnect(qapp):
     """模拟设备只在选择模拟时出现在升级对象表；断开即清空，不挤占真实 BLE 节点。"""
     win = MainWindow(source=SimulateSource(frame_period=0.01))
     _KEEP.append(win)
-    win._select_nav("devices")
-    win.devices.inner.setCurrentWidget(win.ota)
+    win._select_nav("engineering")
+    win.engineering.setCurrentWidget(win.ota)
     _pump(qapp, win, 0.6)
     assert len(win.ota.rows) == 9
     assert all(r.simulated for r in win.ota.rows.values())
@@ -212,6 +219,9 @@ def test_threshold_slider_changes_engine_live(qapp):
     _KEEP.append(win)
     _pump(qapp, win, 0.5)
     panel = win.live.panel
+    assert not win.live.settings_dialog.isVisible()
+    win.live.btn_settings.click()
+    assert win.live.settings_dialog.isVisible()
     before = win.th.asym_warn
     sl = panel.sliders["asym_warn"]
     sl.slider.setValue(int(round((22 - sl.lo) / sl.step)))

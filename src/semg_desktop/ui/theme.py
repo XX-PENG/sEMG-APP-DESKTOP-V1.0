@@ -1,9 +1,4 @@
-"""视觉语言：夜间泛光灯下的曲棍球场 + 运动医学仪表。
-
-色族来自场景本身而不是通用深色模板：深水蓝绿是场地与夜色（最大面积），腘绳肌用暖色
-（品红 BF / 橙 ST）、股四头肌用冷色（电蓝 VL / 青 RF），左右两侧靠明度成对；语义色
-单独一套（安全绿 / 警示琥珀 / 危险红 / 信息蓝），不与肌肉身份色混用。
-"""
+"""克制的中性运动工作台：深灰蓝底、低饱和强调色、清晰的信息层级。"""
 
 from __future__ import annotations
 
@@ -11,32 +6,32 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QApplication
 
 C = {
-    "bg0": "#050C11",
-    "bg1": "#08161D",
-    "surface": "#0D2029",
-    "surface2": "#122C37",
-    "overlay": "#173845",
-    "border": "#1E4453",
-    "border_soft": "#15333F",
-    "text": "#E9F4F4",
-    "text_warm": "#F6EEE3",
-    "muted": "#82A3AF",
-    "dim": "#54737F",
-    "turf": "#12E0C4",
-    "turf_deep": "#0A8F80",
-    "blue": "#3D9BFF",
-    "magenta": "#FF4D8D",
-    "orange": "#FF8A3D",
-    "lime": "#B6FF3D",
-    "safe": "#2FD98A",
-    "warn": "#FFB020",
-    "danger": "#FF3B5C",
-    "info": "#3D9BFF",
+    "bg0": "#11171D",
+    "bg1": "#171F27",
+    "surface": "#1C252E",
+    "surface2": "#26323D",
+    "overlay": "#303E4B",
+    "border": "#3A4A58",
+    "border_soft": "#2C3944",
+    "text": "#F1F3F5",
+    "text_warm": "#FAFBFC",
+    "muted": "#A8B4BF",
+    "dim": "#778895",
+    "turf": "#8BC4B5",
+    "turf_deep": "#527F74",
+    "blue": "#7EACCF",
+    "magenta": "#C87991",
+    "orange": "#D19A6A",
+    "lime": "#A8BC78",
+    "safe": "#79B99A",
+    "warn": "#D5AD66",
+    "danger": "#D97979",
+    "info": "#7EACCF",
 }
 
 MUSCLE_COLORS = {
-    "bf_l": "#FF4D8D", "st_l": "#FF8A3D", "vl_l": "#3D9BFF", "rf_l": "#12E0C4",
-    "bf_r": "#FFA8C8", "st_r": "#FFC48A", "vl_r": "#9CC9FF", "rf_r": "#7FF0E2",
+    "bf_l": "#C87991", "st_l": "#D19A6A", "vl_l": "#7EACCF", "rf_l": "#8BC4B5",
+    "bf_r": "#DBA2AF", "st_r": "#E1B58E", "vl_r": "#A7C6DD", "rf_r": "#B0D5CA",
 }
 
 UI_FAMILY = "Microsoft YaHei UI"
@@ -83,27 +78,28 @@ QWidget {{
     font-family: "{UI_FAMILY}";
     font-size: 13px;
 }}
-QMainWindow, QDialog {{ background: {C['bg0']}; }}
+QMainWindow, QDialog {{ background: {C['bg1']}; }}
 QToolTip {{
-    background: {C['overlay']}; color: {C['text']};
+    background: {C['surface2']}; color: {C['text']};
     border: 1px solid {C['border']}; padding: 6px 9px; border-radius: 6px;
 }}
 
 /* ── 外壳：用 app 级 ID 规则而非 widget.setStyleSheet，
    否则父级 widget 样式表会让子按钮的 app 级背景整片失效 ── */
-QWidget#NavRail {{ background: rgba(5, 12, 17, 205); border-right: 1px solid {C['border_soft']}; }}
-QWidget#TopBar {{ background: rgba(8, 22, 29, 215); border-bottom: 1px solid {C['border_soft']}; }}
+QWidget#NavRail {{ background: {C['bg0']}; border-right: 1px solid {C['border_soft']}; }}
+QWidget#TopBar {{ background: {C['bg0']}; border-bottom: 1px solid {C['border_soft']}; }}
+QTabWidget#EngineeringTabs {{ padding: 12px; background: {C['bg1']}; }}
 
 /* ── 卡片 ── */
 QFrame#Card, QWidget#Card {{
-    background: rgba(13, 32, 41, 232);
+    background: {C['surface']};
     border: 1px solid {C['border_soft']};
-    border-radius: 14px;
+    border-radius: 10px;
 }}
 QFrame#CardFlat {{ background: transparent; border: none; }}
 QLabel#CardTitle {{
     color: {C['text']}; font-size: 14px; font-weight: 700;
-    letter-spacing: 1px; background: transparent;
+    background: transparent;
 }}
 QLabel#CardHint {{ color: {C['dim']}; font-size: 11px; background: transparent; }}
 QLabel#Muted {{ color: {C['muted']}; background: transparent; }}
@@ -114,16 +110,22 @@ QLabel#Metric {{
 }}
 QLabel#MetricUnit {{ color: {C['dim']}; font-size: 12px; background: transparent; }}
 QLabel#SectionHead {{
-    color: {C['turf']}; font-size: 12px; font-weight: 700;
-    letter-spacing: 2px; background: transparent;
+    color: {C['muted']}; font-size: 11px; font-weight: 700;
+    background: transparent;
 }}
+QLabel#PageTitle {{ color: {C['text_warm']}; font-size: 24px; font-weight: 700; background: transparent; }}
+QLabel#PageHint {{ color: {C['muted']}; font-size: 12px; background: transparent; }}
+QLabel#SourceHealthy {{ color: {C['safe']}; background: transparent; font-size: 12px; }}
+QLabel#SourceWarning {{ color: {C['warn']}; background: transparent; font-size: 12px; }}
+QLabel#SourceOffline {{ color: {C['muted']}; background: transparent; font-size: 12px; }}
 
 /* ── 按钮 ── */
 QPushButton {{
     background: {C['surface2']};
     border: 1px solid {C['border']};
-    border-radius: 9px;
+    border-radius: 7px;
     padding: 7px 14px;
+    min-height: 20px;
     color: {C['text']};
     font-weight: 600;
 }}
@@ -132,38 +134,38 @@ QPushButton:pressed {{ background: {C['turf_deep']}; }}
 QPushButton:disabled {{ color: {C['dim']}; background: {C['surface']}; border-color: {C['border_soft']}; }}
 QPushButton#Primary {{
     background: {C['turf']};
-    color: #04211D; border: none; font-weight: 800;
+    color: #13201E; border: none; font-weight: 700;
 }}
-QPushButton#Primary:hover {{ background: #5FF0DC; }}
-QPushButton#Primary:pressed {{ background: {C['turf_deep']}; color: #E9F4F4; }}
+QPushButton#Primary:hover {{ background: #A5D3C7; }}
+QPushButton#Primary:pressed {{ background: {C['turf_deep']}; color: {C['text_warm']}; }}
 QPushButton#Primary:disabled {{ background: {C['surface2']}; color: {C['dim']}; }}
 QPushButton#Danger {{
-    background: rgba(255, 59, 92, 32); border: 1px solid {C['danger']}; color: #FFC2CD;
+    background: #503237; border: 1px solid {C['danger']}; color: #F4C6C6;
 }}
-QPushButton#Danger:hover {{ background: rgba(255, 59, 92, 70); }}
+QPushButton#Danger:hover {{ background: #663D43; }}
 QPushButton#Ghost {{ background: transparent; border: 1px solid {C['border']}; color: {C['muted']}; }}
 QPushButton#Ghost:hover {{ color: {C['text']}; border-color: {C['turf_deep']}; }}
 QPushButton#NavButton {{
-    background: transparent; border: none; border-radius: 10px;
-    padding: 10px 12px; text-align: left; color: {C['muted']}; font-weight: 600;
+    background: transparent; border: none; border-radius: 6px;
+    padding: 10px 12px; text-align: left; color: {C['muted']}; font-weight: 500;
 }}
-QPushButton#NavButton:hover {{ background: rgba(18, 224, 196, 22); color: {C['text']}; }}
+QPushButton#NavButton:hover {{ background: {C['surface']}; color: {C['text']}; }}
 QPushButton#NavButton[active="true"] {{
-    background: rgba(18, 224, 196, 40);
+    background: {C['surface2']};
     border-left: 3px solid {C['turf']};
-    color: {C['turf']};
+    color: {C['text_warm']};
 }}
 QPushButton#Chip {{
-    background: {C['surface2']}; border: 1px solid {C['border']};
-    border-radius: 13px; padding: 4px 12px; color: {C['muted']}; font-size: 12px;
+    background: transparent; border: 1px solid {C['border']};
+    border-radius: 6px; padding: 4px 10px; color: {C['muted']}; font-size: 12px;
 }}
-QPushButton#Chip:checked {{ background: rgba(18, 224, 196, 40); border-color: {C['turf']}; color: {C['turf']}; }}
+QPushButton#Chip:checked {{ background: {C['surface2']}; border-color: {C['turf_deep']}; color: {C['text']}; }}
 QPushButton#Chip:hover {{ color: {C['text']}; }}
 
 /* ── 输入 ── */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background: {C['bg1']}; border: 1px solid {C['border']};
-    border-radius: 8px; padding: 5px 9px; color: {C['text']};
+    border-radius: 6px; padding: 6px 9px; color: {C['text']};
     selection-background-color: {C['turf_deep']};
 }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {C['turf']}; }}
@@ -190,41 +192,41 @@ QCheckBox:hover {{ color: {C['text']}; }}
 
 /* ── 滑杆 ── */
 QSlider::groove:horizontal {{
-    height: 5px; border-radius: 3px;
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(18, 44, 55, 255), stop:1 rgba(23, 56, 69, 255));
+    height: 4px; border-radius: 2px;
+    background: {C['surface2']};
 }}
 QSlider::sub-page:horizontal {{
-    height: 5px; border-radius: 3px;
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(10, 143, 128, 255), stop:1 rgba(18, 224, 196, 255));
+    height: 4px; border-radius: 2px;
+    background: {C['turf_deep']};
 }}
 QSlider::handle:horizontal {{
-    width: 15px; height: 15px; margin: -6px 0; border-radius: 8px;
-    background: {C['text_warm']}; border: 2px solid {C['turf']};
+    width: 14px; height: 14px; margin: -5px 0; border-radius: 7px;
+    background: {C['text']}; border: 2px solid {C['turf_deep']};
 }}
 QSlider::handle:horizontal:hover {{ background: {C['turf']}; }}
 QSlider::groove:vertical {{ width: 5px; border-radius: 3px; background: {C['surface2']}; }}
 QSlider::handle:vertical {{
-    width: 15px; height: 15px; margin: 0 -6px; border-radius: 8px;
-    background: {C['text_warm']}; border: 2px solid {C['turf']};
+    width: 15px; height: 15px; margin: 0 -5px; border-radius: 8px;
+    background: {C['text']}; border: 2px solid {C['turf_deep']};
 }}
 
 /* ── 表格 ── */
 QTableWidget, QTableView, QListWidget, QTreeWidget {{
-    background: rgba(8, 22, 29, 210);
-    alternate-background-color: rgba(18, 44, 55, 130);
-    border: 1px solid {C['border_soft']}; border-radius: 10px;
-    gridline-color: rgba(30, 68, 83, 130);
+    background: {C['bg1']};
+    alternate-background-color: {C['surface']};
+    border: 1px solid {C['border_soft']}; border-radius: 7px;
+    gridline-color: {C['border_soft']};
     outline: none;
 }}
-QTableWidget::item, QListWidget::item {{ padding: 5px 7px; border: none; }}
+QTableWidget::item, QListWidget::item {{ padding: 6px 7px; border: none; }}
 QTableWidget::item:selected, QListWidget::item:selected {{
-    background: rgba(18, 224, 196, 52); color: {C['text_warm']};
+    background: {C['surface2']}; color: {C['text_warm']};
 }}
 QHeaderView::section {{
     background: {C['surface2']}; color: {C['muted']};
     border: none; border-right: 1px solid {C['border_soft']};
     border-bottom: 1px solid {C['border']};
-    padding: 7px 6px; font-weight: 700; font-size: 11px;
+    padding: 7px 6px; font-weight: 600; font-size: 11px;
 }}
 QTableCornerButton::section {{ background: {C['surface2']}; border: none; }}
 
@@ -235,29 +237,29 @@ QAbstractScrollArea::viewport {{ background: transparent; }}
 
 /* ── 滚动条：用本系统自己的色族，不留浏览器/系统默认灰 ── */
 QScrollBar:vertical {{
-    background: {C['bg1']}; width: 11px; margin: 2px; border-radius: 5px;
+    background: transparent; width: 10px; margin: 2px;
 }}
 QScrollBar::handle:vertical {{
-    background: {C['turf_deep']}; min-height: 32px; border-radius: 5px;
+    background: {C['border']}; min-height: 32px; border-radius: 4px;
 }}
-QScrollBar::handle:vertical:hover {{ background: {C['turf']}; }}
+QScrollBar::handle:vertical:hover {{ background: {C['dim']}; }}
 QScrollBar:horizontal {{
-    background: {C['bg1']}; height: 11px; margin: 2px; border-radius: 5px;
+    background: transparent; height: 10px; margin: 2px;
 }}
 QScrollBar::handle:horizontal {{
-    background: {C['turf_deep']}; min-width: 32px; border-radius: 5px;
+    background: {C['border']}; min-width: 32px; border-radius: 4px;
 }}
-QScrollBar::handle:horizontal:hover {{ background: {C['turf']}; }}
+QScrollBar::handle:horizontal:hover {{ background: {C['dim']}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 /* ── 分页 / 分组 / 进度 ── */
-QTabWidget::pane {{ border: 1px solid {C['border_soft']}; border-radius: 10px; top: -1px; }}
+QTabWidget::pane {{ border: 1px solid {C['border_soft']}; border-radius: 7px; top: -1px; }}
 QTabBar::tab {{
-    background: transparent; color: {C['dim']}; padding: 8px 16px;
-    border-bottom: 2px solid transparent; font-weight: 600;
+    background: transparent; color: {C['dim']}; padding: 9px 15px;
+    border-bottom: 2px solid transparent; font-weight: 500;
 }}
-QTabBar::tab:selected {{ color: {C['turf']}; border-bottom: 2px solid {C['turf']}; }}
+QTabBar::tab:selected {{ color: {C['text_warm']}; border-bottom: 2px solid {C['turf']}; }}
 QTabBar::tab:hover {{ color: {C['text']}; }}
 QGroupBox {{
     border: 1px solid {C['border_soft']}; border-radius: 10px;
@@ -273,8 +275,8 @@ QSplitter::handle {{ background: {C['border_soft']}; }}
 QSplitter::handle:horizontal {{ width: 2px; }}
 QSplitter::handle:vertical {{ height: 2px; }}
 QPlainTextEdit, QTextEdit {{
-    background: rgba(5, 12, 17, 220); border: 1px solid {C['border_soft']};
-    border-radius: 9px; color: {C['muted']};
+    background: {C['bg0']}; border: 1px solid {C['border_soft']};
+    border-radius: 6px; color: {C['muted']};
     font-family: "{MONO_FAMILY}"; font-size: 11px;
 }}
 QStatusBar {{ background: {C['bg0']}; color: {C['dim']}; border-top: 1px solid {C['border_soft']}; }}

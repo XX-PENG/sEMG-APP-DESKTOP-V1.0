@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import math
-import time
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -91,90 +90,15 @@ class StatTile(QFrame):
 
 
 class ShellBackground(QWidget):
-    """球场夜色背景：渐变 + 泛光灯晕 + 场地弧线 + 颗粒， resize 时缓存成位图。"""
+    """纯色工作区，避免装饰背景干扰数据判读。"""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._cache = None
-        self._cache_size = None
         self.setAttribute(Qt.WA_StyledBackground, False)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        self._cache = None
-        super().resizeEvent(event)
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        size = self.size()
-        if size.width() < 4 or size.height() < 4:
-            return
-        if self._cache is None or self._cache_size != size:
-            self._cache = self._render(size)
-            self._cache_size = size
-        p = QPainter(self)
-        p.drawPixmap(0, 0, self._cache)
-
-    def _render(self, size):
-        from PySide6.QtGui import QPixmap
-
-        pm = QPixmap(size)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        w, h = size.width(), size.height()
-
-        base = QLinearGradient(0, 0, w * 0.4, h)
-        base.setColorAt(0.0, QColor("#071620"))
-        base.setColorAt(0.45, QColor(T.C["bg1"]))
-        base.setColorAt(1.0, QColor(T.C["bg0"]))
-        p.fillRect(0, 0, w, h, base)
-
-        for cx, cy, r, col, a in (
-            (w * 0.12, h * 0.02, max(w, h) * 0.55, T.C["turf"], 30),
-            (w * 0.95, h * 0.92, max(w, h) * 0.5, T.C["magenta"], 20),
-            (w * 0.62, h * 0.30, max(w, h) * 0.38, T.C["blue"], 14),
-        ):
-            g = QRadialGradient(cx, cy, r)
-            c = QColor(col)
-            c.setAlpha(a)
-            g.setColorAt(0.0, c)
-            c2 = QColor(col)
-            c2.setAlpha(0)
-            g.setColorAt(1.0, c2)
-            p.fillRect(0, 0, w, h, QBrush(g))
-
-        # 曲棍球场弧线：23 m 线与射门弧的抽象，压到几乎看不见，只提供场地暗示
-        pen = QPen(QColor(18, 224, 196, 16), 1.6)
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        cx, cy = w * 0.5, h * 1.28
-        for rr in (h * 0.62, h * 0.86, h * 1.10):
-            p.drawEllipse(QPointF(cx, cy), rr, rr * 0.62)
-        p.setPen(QPen(QColor(61, 155, 255, 12), 1.2))
-        for i in range(1, 7):
-            x = w * i / 7.0
-            p.drawLine(QPointF(x, 0), QPointF(x - h * 0.18, h))
-
-        grain = self._grain()
-        p.setOpacity(0.5)
-        for y in range(0, h, grain.height()):
-            for x in range(0, w, grain.width()):
-                p.drawPixmap(x, y, grain)
-        p.setOpacity(1.0)
-        p.end()
-        return pm
-
-    @staticmethod
-    def _grain():
-        from PySide6.QtGui import QImage, QPixmap
-
-        rng = np.random.default_rng(5)
-        n = 96
-        noise = rng.integers(0, 26, (n, n), dtype=np.uint8)
-        img = QImage(n, n, QImage.Format_ARGB32)
-        for y in range(n):
-            for x in range(n):
-                v = int(noise[y, x])
-                img.setPixel(x, y, QColor(v, v + 4, v + 6, 13).rgba())
-        return QPixmap.fromImage(img)
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QColor(T.C["bg1"]))
+        self.setPalette(palette)
 
 
 class RiskGauge(QWidget):
@@ -186,16 +110,6 @@ class RiskGauge(QWidget):
         self.available = False
         self.setMinimumSize(210, 178)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._pulse = 0.0
-        self._timer = QTimer(self)
-        self._timer.setInterval(40)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start()
-
-    def _tick(self) -> None:
-        self._pulse = (time.monotonic() * 1.1) % 1.0
-        if self.score >= 65:
-            self.update()
 
     def set_score(self, score: float, available: bool = True) -> None:
         if abs(score - self.score) > 0.05 or available != self.available:
@@ -212,53 +126,40 @@ class RiskGauge(QWidget):
         start, span = 210.0, -240.0     # 从左下逆时针扫到右下
 
         if self.score >= 65 and self.available:
-            halo = 0.5 + 0.5 * math.sin(self._pulse * 2 * math.pi)
-            g = QRadialGradient(cx, cy, r * 1.55)
-            c = QColor(T.C["danger"])
-            c.setAlpha(int(20 + 46 * halo))
-            g.setColorAt(0.55, c)
-            c.setAlpha(0)
-            g.setColorAt(1.0, c)
-            p.setBrush(QBrush(g))
+            halo = QColor(T.C["danger"])
+            halo.setAlpha(30)
+            p.setBrush(halo)
             p.setPen(Qt.NoPen)
-            p.drawEllipse(QPointF(cx, cy), r * 1.55, r * 1.55)
+            p.drawEllipse(QRectF(cx - r * 1.55, cy - r * 1.55,
+                                 r * 3.1, r * 3.1))
 
         rect = QRectF(cx - r, cy - r, 2 * r, 2 * r)
-        p.setPen(QPen(QColor(30, 68, 83, 190), 13, Qt.SolidLine, Qt.RoundCap))
+        p.setPen(QPen(QColor(T.C["border"]), 13, Qt.SolidLine, Qt.RoundCap))
         p.setBrush(Qt.NoBrush)
         p.drawArc(rect, int(start * 16), int(span * 16))
 
         for i in range(0, 11):
             ang = math.radians(start + span * i / 10.0)
             r1, r2 = r - 12, r - 18
-            p.setPen(QPen(QColor(130, 163, 175, 110), 1.4))
+            tick = QColor(T.C["dim"])
+            tick.setAlpha(150)
+            p.setPen(QPen(tick, 1.4))
             p.drawLine(QPointF(cx + r1 * math.cos(ang), cy - r1 * math.sin(ang)),
                        QPointF(cx + r2 * math.cos(ang), cy - r2 * math.sin(ang)))
 
         if self.available and self.score > 0.5:
             frac = min(1.0, self.score / 100.0)
-            grad = QLinearGradient(cx - r, cy, cx + r, cy)
-            grad.setColorAt(0.0, QColor(T.C["safe"]))
-            grad.setColorAt(0.42, QColor(T.C["warn"]))
-            grad.setColorAt(1.0, QColor(T.C["danger"]))
-            p.setPen(QPen(QBrush(grad), 13, Qt.SolidLine, Qt.RoundCap))
+            p.setPen(QPen(QColor(T.risk_color(self.score)), 13, Qt.SolidLine, Qt.RoundCap))
             p.drawArc(rect, int(start * 16), int(span * frac * 16))
             ang = math.radians(start + span * frac)
             ex, ey = cx + r * math.cos(ang), cy - r * math.sin(ang)
-            col = QColor(T.risk_color(self.score))
-            g2 = QRadialGradient(ex, ey, 15)
-            g2.setColorAt(0.0, QColor(255, 255, 255, 235))
-            g2.setColorAt(0.35, col)
-            c = QColor(col)
-            c.setAlpha(0)
-            g2.setColorAt(1.0, c)
             p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(g2))
-            p.drawEllipse(QPointF(ex, ey), 15, 15)
+            p.setBrush(QColor(T.risk_color(self.score)))
+            p.drawEllipse(QPointF(ex, ey), 5.5, 5.5)
 
         name, col, _ = risk_band(self.score)
         p.setPen(QColor(col if self.available else T.C["dim"]))
-        f = T.font(40, QFont.Bold, mono=True)
+        f = T.font(42, QFont.DemiBold, mono=True)
         p.setFont(f)
         p.drawText(QRectF(cx - r, cy - 34, 2 * r, 48), Qt.AlignCenter,
                    f"{self.score:.0f}" if self.available else "—")
@@ -715,7 +616,7 @@ class FactorBars(QWidget):
 
 
 class CueBanner(QWidget):
-    """实时反馈指令横幅：等级配色 + 呼吸边条 + 可执行指令。"""
+    """优先显示一句可执行建议，次要说明按需显示。"""
 
     LEVELS = {
         "calm": ("safe", "状态平稳"),
@@ -729,18 +630,8 @@ class CueBanner(QWidget):
         self.level = "calm"
         self.title = "等待传感器"
         self.text = ""
-        self.setMinimumHeight(84)
+        self.setMinimumHeight(78)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._pulse = 0.0
-        self._timer = QTimer(self)
-        self._timer.setInterval(45)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start()
-
-    def _tick(self) -> None:
-        self._pulse = (time.monotonic() * 0.85) % 1.0
-        if self.level in ("warn", "stop"):
-            self.update()
 
     def set_cue(self, level: str, title: str, text: str) -> None:
         if (level, title, text) != (self.level, self.title, self.text):
@@ -753,38 +644,29 @@ class CueBanner(QWidget):
         w, h = self.width(), self.height()
         key, tag = self.LEVELS.get(self.level, self.LEVELS["calm"])
         col = QColor(T.C[key])
-        rect = QRectF(1, 1, w - 2, h - 2)
-
-        g = QLinearGradient(0, 0, w, h)
-        c = QColor(col)
-        c.setAlpha(46 if self.level in ("warn", "stop") else 26)
-        g.setColorAt(0.0, c)
-        c2 = QColor(T.C["surface"])
-        c2.setAlpha(235)
-        g.setColorAt(0.55, c2)
-        g.setColorAt(1.0, c2)
-        p.setBrush(QBrush(g))
+        rect = QRectF(0.5, 0.5, w - 1, h - 1)
+        fill = QColor(T.C["surface"])
+        fill.setAlpha(245)
+        p.setBrush(fill)
         border = QColor(col)
-        border.setAlpha(150)
-        p.setPen(QPen(border, 1.4))
-        p.drawRoundedRect(rect, 13, 13)
+        border.setAlpha(130)
+        p.setPen(QPen(border, 1))
+        p.drawRoundedRect(rect, 8, 8)
 
-        breathe = 0.55 + 0.45 * math.sin(self._pulse * 2 * math.pi)
-        bar = QColor(col)
-        bar.setAlpha(int(255 * breathe) if self.level in ("warn", "stop") else 210)
         p.setPen(Qt.NoPen)
-        p.setBrush(bar)
-        p.drawRoundedRect(QRectF(1, 1, 6, h - 2), 3, 3)
+        p.setBrush(col)
+        p.drawRoundedRect(QRectF(0.5, 8, 4, h - 16), 2, 2)
 
-        p.setFont(T.font(10, QFont.Bold))
-        p.setPen(QColor(col))
-        p.drawText(QRectF(20, 11, 200, 16), Qt.AlignLeft | Qt.AlignVCenter, f"实时指令 · {tag}")
-        p.setFont(T.font(17, QFont.Bold))
+        p.setFont(T.font(11, QFont.DemiBold))
+        p.setPen(col)
+        p.drawText(QRectF(18, 10, 100, 16), Qt.AlignLeft | Qt.AlignVCenter, tag)
+        p.setFont(T.font(18, QFont.Bold))
         p.setPen(QColor(T.C["text_warm"]))
-        p.drawText(QRectF(20, 28, w - 40, 24), Qt.AlignLeft | Qt.AlignVCenter, self.title)
-        p.setFont(T.font(12))
-        p.setPen(QColor(T.C["muted"]))
-        p.drawText(QRectF(20, 54, w - 36, h - 60), Qt.AlignLeft | Qt.TextWordWrap, self.text)
+        p.drawText(QRectF(18, 28, w - 36, 26), Qt.AlignLeft | Qt.AlignVCenter, self.title)
+        if self.text:
+            p.setFont(T.font(12))
+            p.setPen(QColor(T.C["muted"]))
+            p.drawText(QRectF(18, 55, w - 36, h - 61), Qt.AlignLeft | Qt.AlignVCenter, self.text)
         p.end()
 
 
@@ -807,8 +689,8 @@ class Sparkline(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         w, h = self.width(), self.height()
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(8, 22, 29, 150))
-        p.drawRoundedRect(QRectF(0, 0, w, h), 7, 7)
+        p.setBrush(QColor(T.C["bg1"]))
+        p.drawRoundedRect(QRectF(0, 0, w, h), 6, 6)
         if len(self.values) < 2:
             p.setPen(QColor(T.C["dim"]))
             p.setFont(T.font(10))
